@@ -130,7 +130,7 @@ Response Controller::handle_project_open(const std::string &body)
         wxString filename = wxString::FromUTF8(path.c_str());
         boost::system::error_code ec;
         if (!boost::filesystem::exists(into_path(filename), ec))
-            return {{"error", "not_found"}};
+            return {{"error", "file_not_found"}};
         Plater *plater = wxGetApp().plater();
         if (has_unsaved_changes(plater)) {
             if (!discard)
@@ -147,7 +147,7 @@ Response Controller::handle_project_open(const std::string &body)
     }, /*timeout_s=*/120);
     if (r.contains("error")) {
         const std::string err = r["error"].get<std::string>();
-        if (err == "not_found") return { 404, r };
+        if (err == "file_not_found") return { 404, r };
         if (err == "unsaved_changes") return { 409, r };
         return { 422, r };
     }

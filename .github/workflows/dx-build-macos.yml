@@ -1,0 +1,59 @@
+# dxoraxs fork: build OrcaSlicer for macOS arm64 from dx/main and publish it as a release.
+# Started by hand or by dx-sync-upstream after it merges a new upstream release.
+name: dx build macOS arm64
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish a GitHub release with the built app'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dx-build-macos
+  cancel-in-progress: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/build_check_cache.yml
+    with:
+      os: macos-14
+      arch: arm64
+    secrets: inherit
+
+  release:
+    needs: build
+    if: ${{ inputs.publish }}
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - uses: actions/download-artifact@v7
+        with:
+          name: OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}
+      - name: Package and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base=$(git describe --tags --abbrev=0 --match 'v*-mcp.*' --exclude '*-dx.*' HEAD)
+          n=$(git rev-list --count "${base}..HEAD")
+          tag="${base}-dx.${n}"
+          tar -xzf "OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}.tar.gz"
+          mkdir dmg && cp -R OrcaSlicer/OrcaSlicer.app dmg/ && ln -s /Applications dmg/Applications
+          dmg_name="OrcaSlicer_Mac_arm64_${tag}.dmg"
+          hdiutil create -volname "OrcaSlicer" -srcfolder dmg -ov -format UDZO "$dmg_name"
+          notes=$(printf 'OrcaSlicer %s (MaxEllis MCP build) plus the dxoraxs patches:\n\n%s\n\nInstall with printer-biqu scripts/install-orca-dx.sh (removes the download quarantine; the app is ad-hoc signed).' \
+            "$base" "$(git log --format='- %s' "${base}..HEAD" -- src)")
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$dmg_name" --clobber
+          else
+            gh release create "$tag" "$dmg_name" --target "${{ github.sha }}" \
+              --title "$tag" --notes "$notes" --latest
+          fi

@@ -40,20 +40,25 @@ jobs:
       - name: Package and publish
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE: orca-dx
         run: |
           set -euo pipefail
           base=$(git describe --tags --abbrev=0 --match 'v*-mcp.*' --exclude '*-dx.*' HEAD)
           n=$(git rev-list --count "${base}..HEAD")
-          tag="${base}-dx.${n}"
+          version="${base}-dx.${n}"
           tar -xzf "OrcaSlicer_Mac_bundle_arm64_${{ github.sha }}.tar.gz"
           mkdir dmg && cp -R OrcaSlicer/OrcaSlicer.app dmg/ && ln -s /Applications dmg/Applications
-          dmg_name="OrcaSlicer_Mac_arm64_${tag}.dmg"
+          dmg_name="OrcaSlicer_Mac_arm64_${version}.dmg"
           hdiutil create -volname "OrcaSlicer" -srcfolder dmg -ov -format UDZO "$dmg_name"
-          notes=$(printf 'OrcaSlicer %s (MaxEllis MCP build) plus the dxoraxs patches:\n\n%s\n\nInstall with printer-biqu scripts/install-orca-dx.sh (removes the download quarantine; the app is ad-hoc signed).' \
-            "$base" "$(git log --format='- %s' "${base}..HEAD" -- src)")
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "$dmg_name" --clobber
-          else
-            gh release create "$tag" "$dmg_name" --target "${{ github.sha }}" \
-              --title "$tag" --notes "$notes" --latest
+          notes=$(printf '**%s** (commit %s)\n\nOrcaSlicer %s (MaxEllis MCP build) plus the dxoraxs patches:\n\n%s\n\nInstall with printer-biqu scripts/install-orca-dx.sh (removes the download quarantine; the app is ad-hoc signed).' \
+            "$version" "${GITHUB_SHA:0:9}" "$base" "$(git log --no-merges --format='- %s' "${base}..HEAD" -- src)")
+          # One rolling release: the Actions token may not create tags in this fork, but it may
+          # replace assets of an existing release. The tag was created once by hand.
+          if ! gh release view "$RELEASE" >/dev/null 2>&1; then
+            echo "release $RELEASE is missing: create it once with a personal token (see dx/README.md)" >&2; exit 1
           fi
+          for old in $(gh release view "$RELEASE" --json assets -q '.assets[].name' | grep '^OrcaSlicer_Mac_arm64_' || true); do
+            gh release delete-asset "$RELEASE" "$old" -y
+          done
+          gh release upload "$RELEASE" "$dmg_name"
+          gh release edit "$RELEASE" --title "OrcaSlicer dx: $version" --notes "$notes" --latest

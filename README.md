@@ -1,3 +1,18 @@
+> [!IMPORTANT]
+> **dxoraxs fork of the MCP build.** [MaxEllis/OrcaSlicer](https://github.com/MaxEllis/OrcaSlicer) (`v*-mcp.*` releases) plus Remote API routes that never open a dialog, so an assistant cannot leave the GUI blocked on a modal:
+>
+> | Route | Does |
+> |-------|------|
+> | `POST /api/v1/project/save` | save the open project as .3mf at a path (folders created) or in place |
+> | `POST /api/v1/project/open` | open a .3mf as a project (models, plates, settings) |
+> | `POST /api/v1/project/new` | start an empty project |
+> | `GET/POST /api/v1/plates`, `POST /api/v1/plates/select`, `DELETE /api/v1/plates/{i}` | list, add, select, delete empty plates |
+> | `POST /api/v1/objects/{id}/plate` | move an object to another plate |
+>
+> With unsaved changes, new/open answer 409 `unsaved_changes` unless the body has `"discard": true`. `/status` lists `project_save`, `project_open`, `plates` in `capabilities`.
+>
+> **Download:** macOS arm64 `.dmg` in the rolling release [`orca-dx`](https://github.com/dxoraxs/OrcaSlicer/releases/tag/orca-dx) (ad-hoc signed: remove the quarantine flag after copying). A daily workflow merges each new MaxEllis release and rebuilds. Use it with the [dxoraxs orcaslicer-mcp](https://github.com/dxoraxs/orcaslicer-mcp), which has tools for all of the above. Details: [`dx/README.md`](dx/README.md). The upstream notes follow.
+
 > [!NOTE]
 > **This is the OrcaSlicer MCP fork.** It adds a token-authenticated local Remote API so AI assistants can work the slicer: load models, edit settings, slice, read per-feature breakdowns, and render the plate. Download binaries from the [Releases page](https://github.com/MaxEllis/OrcaSlicer/releases) and pair them with the [orcaslicer-mcp](https://github.com/MaxEllis/orcaslicer-mcp) server. Issues are disabled on this repo; report problems on the [orcaslicer-mcp issue tracker](https://github.com/MaxEllis/orcaslicer-mcp/issues). Everything below this note is the upstream OrcaSlicer README.
 >

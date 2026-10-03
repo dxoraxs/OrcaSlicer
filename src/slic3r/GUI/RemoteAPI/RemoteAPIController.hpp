@@ -57,6 +57,7 @@ private:
     Response handle_slice_status();
     Response handle_slice_cancel();   // F2: POST /slice/cancel - unwedge/abort
     Response handle_load_model(const std::string &body);   // M4a: POST /model
+    Response handle_project_save(const std::string &body); // dxoraxs: POST /project/save
     Response handle_select_preset(const std::string &body); // M4a: PUT /preset
     Response handle_save_preset(const std::string &body);   // POST /preset/save
     Response handle_get_presets();                          // GET /presets

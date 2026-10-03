@@ -8,6 +8,7 @@
 #include "slic3r/GUI/GUI_App.hpp"
 #include "slic3r/GUI/PartPlate.hpp"
 #include "slic3r/GUI/Plater.hpp"
+#include "slic3r/GUI/GUI.hpp"         // dxoraxs project/save: into_path
 #include "libslic3r/Model.hpp"    // M4b: ModelObject/ModelInstance for GET /objects
 #include "slic3r/GUI/NotificationManager.hpp" // in-app change notifications
 #include "libslic3r/AppConfig.hpp"             // remote_api_notify toggle
@@ -292,6 +293,7 @@ Response Controller::handle_status()
         };
     });
     j["slicing"] = slice_state().state == "slicing";
+    j["capabilities"].push_back("project_save"); // dxoraxs fork
     return { 200, j };
 }
 
@@ -1172,6 +1174,85 @@ Response Controller::handle_load_model(const std::string &body)
     return { 200, r };
 }
 
+// dxoraxs: POST /api/v1/project/save  body {"path": "/abs/name.3mf", "overwrite": false}
+// Saves the open project as a .3mf without the Save As dialog: the same steps as
+// Plater::save_project (export, drop the backup, adopt the filename, clear dirty),
+// minus the modal error box. No "path" saves the already-named project in place.
+Response Controller::handle_project_save(const std::string &body)
+{
+    nlohmann::json in = body.empty() ? nlohmann::json::object() : nlohmann::json::parse(body);
+    if (!in.is_object())
+        return { 400, {{"error", "invalid_body"}} };
+    std::string path;
+    if (in.contains("path") && !in["path"].is_null()) {
+        if (!in["path"].is_string())
+            return { 400, {{"error", "invalid_path"}} };
+        path = in["path"].get<std::string>();
+    }
+    if (in.contains("overwrite") && !in["overwrite"].is_boolean())
+        return { 400, {{"error", "invalid_overwrite"}} };
+    const bool overwrite = in.value("overwrite", false);
+
+    if (!path.empty()) {
+        boost::filesystem::path p = into_path(wxString::FromUTF8(path.c_str()));
+        if (!p.is_absolute())
+            return { 400, {{"error", "path_not_absolute"}} };
+        std::string ext = p.extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(),
+                       [](unsigned char c) { return (char) std::tolower(c); });
+        if (ext.empty())
+            path += ".3mf";
+        else if (ext != ".3mf")
+            return { 422, {{"error", "bad_extension"}, {"detail", "project files are .3mf"}} };
+    }
+
+    nlohmann::json r = run_on_ui([path, overwrite]() -> nlohmann::json {
+        Plater *plater = wxGetApp().plater();
+        wxString filename = path.empty() ? plater->get_project_filename(".3mf")
+                                         : wxString::FromUTF8(path.c_str());
+        if (filename.IsEmpty())
+            return {{"error", "no_project_path"}};
+        boost::filesystem::path out = into_path(filename);
+        boost::system::error_code ec;
+        if (!path.empty()) {
+            if (boost::filesystem::exists(out, ec) && !overwrite)
+                return {{"error", "exists"}};
+            boost::filesystem::create_directories(out.parent_path(), ec);
+            if (ec)
+                return {{"error", "mkdir_failed"}, {"detail", ec.message()}};
+        }
+
+        auto strategy = SaveStrategy::SplitModel | SaveStrategy::ShareMesh;
+        if (wxGetApp().app_config->get_bool("export_sources_full_pathnames"))
+            strategy = strategy | SaveStrategy::FullPathSources;
+        if (plater->export_3mf(out, strategy) < 0)
+            return {{"error", "save_failed"}};
+
+        Slic3r::remove_backup(plater->model(), false);
+        plater->set_project_filename(filename);
+        plater->up_to_date(true, false);
+        plater->up_to_date(true, true);
+        wxGetApp().update_saved_preset_from_current_preset();
+        plater->reset_project_dirty_after_save();
+        plater->update_title_dirty_status();
+
+        boost::uintmax_t size = boost::filesystem::file_size(out, ec);
+        return {{"saved", true},
+                {"path", filename.ToUTF8().data()},
+                {"bytes", ec ? 0 : size},
+                {"project", plater->get_project_filename().ToUTF8().data()}};
+    }, /*timeout_s=*/120);
+
+    if (r.contains("error")) {
+        const std::string err = r["error"].get<std::string>();
+        if (err == "exists" || err == "no_project_path") return { 409, r };
+        api_notify("Couldn't save the project", true);
+        return { 422, r };
+    }
+    api_notify("Saved project " + boost::filesystem::path(r["path"].get<std::string>()).filename().string());
+    return { 200, r };
+}
+
 // M4a: PUT /api/v1/preset  body {"type":"print|filament|printer","name":"..."}
 Response Controller::handle_select_preset(const std::string &body)
 {
@@ -1896,6 +1977,13 @@ Response Controller::dispatch(const Request &req)
         if (is("POST", "/api/v1/model")) {
             try {
                 return handle_load_model(req.body);
+            } catch (const nlohmann::json::parse_error &) {
+                return { 400, {{"error", "invalid_json"}} };
+            }
+        }
+        if (is("POST", "/api/v1/project/save")) {
+            try {
+                return handle_project_save(req.body);
             } catch (const nlohmann::json::parse_error &) {
                 return { 400, {{"error", "invalid_json"}} };
             }

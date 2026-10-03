@@ -293,7 +293,8 @@ Response Controller::handle_status()
         };
     });
     j["slicing"] = slice_state().state == "slicing";
-    j["capabilities"].push_back("project_save"); // dxoraxs fork
+    for (const char *cap : {"project_save", "project_open", "plates"}) // dxoraxs fork
+        j["capabilities"].push_back(cap);
     return { 200, j };
 }
 
@@ -1981,6 +1982,25 @@ Response Controller::dispatch(const Request &req)
                 return { 400, {{"error", "invalid_json"}} };
             }
         }
+        {   // dxoraxs: projects and plates (RemoteAPIDx.cpp)
+            auto guarded = [](auto &&fn) -> Response {
+                try { return fn(); }
+                catch (const nlohmann::json::parse_error &) { return { 400, {{"error", "invalid_json"}} }; }
+            };
+            if (is("POST", "/api/v1/project/new"))   return guarded([&] { return handle_project_new(req.body); });
+            if (is("POST", "/api/v1/project/open"))  return guarded([&] { return handle_project_open(req.body); });
+            if (is("GET",  "/api/v1/plates"))        return handle_get_plates();
+            if (is("POST", "/api/v1/plates"))        return guarded([&] { return handle_add_plate(req.body); });
+            if (is("POST", "/api/v1/plates/select")) return guarded([&] { return handle_select_plate(req.body); });
+            static const std::string plate_pfx = "/api/v1/plates/";
+            std::string ppath = t.substr(0, t.find('?'));
+            if (req.method == "DELETE" && ppath.size() > plate_pfx.size() && ppath.compare(0, plate_pfx.size(), plate_pfx) == 0) {
+                const std::string n = ppath.substr(plate_pfx.size());
+                if (n.empty() || !std::all_of(n.begin(), n.end(), [](unsigned char c) { return std::isdigit(c); }))
+                    return { 400, {{"error", "bad_plate_index"}} };
+                return handle_delete_plate(std::stoi(n));
+            }
+        }
         if (is("POST", "/api/v1/project/save")) {
             try {
                 return handle_project_save(req.body);
@@ -2043,6 +2063,10 @@ Response Controller::dispatch(const Request &req)
                 }
                 if (req.method == "POST" && action == "duplicate")
                     return handle_duplicate_object(oid);
+                if (req.method == "POST" && action == "plate") { // dxoraxs
+                    try { return handle_move_object_to_plate(oid, req.body); }
+                    catch (const nlohmann::json::parse_error &) { return { 400, {{"error", "invalid_json"}} }; }
+                }
                 if (req.method == "PUT" && action == "config") {
                     try { return handle_put_object_config(oid, req.body); }
                     catch (const nlohmann::json::parse_error &) { return { 400, {{"error", "invalid_json"}} }; }

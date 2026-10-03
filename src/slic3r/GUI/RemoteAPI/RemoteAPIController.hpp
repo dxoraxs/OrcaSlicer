@@ -58,6 +58,14 @@ private:
     Response handle_slice_cancel();   // F2: POST /slice/cancel - unwedge/abort
     Response handle_load_model(const std::string &body);   // M4a: POST /model
     Response handle_project_save(const std::string &body); // dxoraxs: POST /project/save
+    // dxoraxs: projects and plates, defined in RemoteAPIDx.cpp
+    Response handle_project_new(const std::string &body);   // POST /project/new
+    Response handle_project_open(const std::string &body);  // POST /project/open
+    Response handle_get_plates();                           // GET /plates
+    Response handle_add_plate(const std::string &body);     // POST /plates
+    Response handle_select_plate(const std::string &body);  // POST /plates/select
+    Response handle_delete_plate(int index);                // DELETE /plates/{index}
+    Response handle_move_object_to_plate(uint64_t id, const std::string &body); // POST /objects/{id}/plate
     Response handle_select_preset(const std::string &body); // M4a: PUT /preset
     Response handle_save_preset(const std::string &body);   // POST /preset/save
     Response handle_get_presets();                          // GET /presets

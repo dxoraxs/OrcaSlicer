@@ -1,4 +1,4 @@
-# dxoraxs fork: build OrcaSlicer for macOS arm64 from dx/main and publish it as a release.
+# dxoraxs fork: build OrcaSlicer for macOS arm64 from main and publish it as a release.
 # Started by hand or by dx-sync-upstream after it merges a new upstream release.
 name: dx build macOS arm64
 

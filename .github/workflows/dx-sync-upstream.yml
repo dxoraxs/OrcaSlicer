@@ -1,4 +1,4 @@
-# dxoraxs fork: once a day merge the newest MaxEllis release tag (v*-mcp.*) into dx/main and
+# dxoraxs fork: once a day merge the newest MaxEllis release tag (v*-mcp.*) into main and
 # start the macOS build. A conflict, or an upstream change to workflow files (GITHUB_TOKEN
 # may not push those), opens an issue instead: run dx/sync-upstream.sh locally then.
 name: dx sync upstream
@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: dx/main
+          ref: main
           fetch-depth: 0
           filter: blob:none
       - name: Merge newest upstream release
@@ -34,26 +34,26 @@ jobs:
           latest=$(git tag -l 'v*-mcp.*' --sort=-v:refname | grep -v -- '-dx\.' | head -1)
           echo "newest upstream release: $latest"
           if git merge-base --is-ancestor "$latest" HEAD; then
-            echo "dx/main already contains $latest"; exit 0
+            echo "main already contains $latest"; exit 0
           fi
           open_issue() {
             title="Upstream $latest needs a manual merge"
             if [ -z "$(gh issue list --state open --search "\"$title\" in:title" --json number -q '.[].number')" ]; then
               gh issue create --title "$title" --body "$1
 
-          Merge locally: \`dx/sync-upstream.sh\` in the clone, resolve, push dx/main, then run the *dx build macOS arm64* workflow."
+          Merge locally: \`dx/sync-upstream.sh\` in the clone, resolve, push main, then run the *dx build macOS arm64* workflow."
             fi
           }
           if ! git merge --no-edit "$latest"; then
             files=$(git diff --name-only --diff-filter=U | sed 's/^/- /')
             git merge --abort
-            open_issue "Merging $latest into dx/main conflicts in:
+            open_issue "Merging $latest into main conflicts in:
           $files"
             exit 0
           fi
-          if ! git push origin dx/main "refs/tags/$latest"; then
+          if ! git push origin main "refs/tags/$latest"; then
             open_issue "Merged $latest cleanly, but the push was refused (it most likely changes .github/workflows, which the Actions token may not push)."
             exit 0
           fi
-          gh workflow run dx-build-macos.yml --ref dx/main
+          gh workflow run dx-build-macos.yml --ref main
           echo "merged $latest and started the macOS build"

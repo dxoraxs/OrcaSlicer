@@ -1,6 +1,6 @@
 # dxoraxs fork of OrcaSlicer (MaxEllis MCP build)
 
-`dx/main` = the newest MaxEllis release tag (`v*-mcp.*`, branch `remote-api-242` upstream)
+`main` = the newest MaxEllis release tag (`v*-mcp.*`, branch `remote-api-242` upstream)
 plus our Remote API additions. Upstream code is untouched except the routes and declarations
 in `RemoteAPIController.*`; our handlers live in `src/slic3r/GUI/RemoteAPI/RemoteAPIDx.cpp`
 (and `handle_project_save` in the controller).
@@ -26,7 +26,7 @@ times out): with unsaved changes, new/open answer 409 `unsaved_changes` unless `
 
 - `dx-build-macos` builds macOS arm64 and replaces the .dmg in the rolling release `orca-dx`.
   The Actions token may not create tags in this fork, so that release was created once by hand
-  (`gh release create orca-dx --target dx/main` with a personal token); the workflow only
+  (`gh release create orca-dx --target main` with a personal token); the workflow only
   swaps its asset and notes.
 - `dx-sync-upstream` (daily) merges a new MaxEllis release and starts the build; a conflict or a
   refused push opens an issue, then run `dx/sync-upstream.sh` locally.

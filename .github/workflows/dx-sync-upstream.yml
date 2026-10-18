@@ -36,13 +36,16 @@ jobs:
           if git merge-base --is-ancestor "$latest" HEAD; then
             echo "main already contains $latest"; exit 0
           fi
+          # A known failure stays quiet: while its issue is open, skip the merge and exit 0,
+          # so one upstream release gives one issue, not a red run every day.
+          title="Upstream $latest needs a manual merge"
+          if [ -n "$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number -q '.[].number')" ]; then
+            echo "issue \"$title\" is already open, nothing to do"; exit 0
+          fi
           open_issue() {
-            title="Upstream $latest needs a manual merge"
-            if [ -z "$(gh issue list --state open --search "\"$title\" in:title" --json number -q '.[].number')" ]; then
-              gh issue create --title "$title" --body "$1
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$1
 
           Merge locally: \`dx/sync-upstream.sh\` in the clone, resolve, push main, then run the *dx build macOS arm64* workflow."
-            fi
           }
           if ! git merge --no-edit "$latest"; then
             files=$(git diff --name-only --diff-filter=U | sed 's/^/- /')
@@ -55,5 +58,5 @@ jobs:
             open_issue "Merged $latest cleanly, but the push was refused (it most likely changes .github/workflows, which the Actions token may not push)."
             exit 0
           fi
-          gh workflow run dx-build-macos.yml --ref main
+          gh workflow run -R "$GITHUB_REPOSITORY" dx-build-macos.yml --ref main
           echo "merged $latest and started the macOS build"

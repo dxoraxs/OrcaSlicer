@@ -1,0 +1,1118 @@
+<!DOCTYPE html>
+<!-- OrcaSlicer MCP panel. One page for every host: the messages it takes and sends are documented in
+     docs/remote-api/README.md, "MCP panel page and protocol". Hosts vendor this file unchanged. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OrcaSlicer MCP</title>
+<style>
+  /* Colours: the host's theme variables where it sends them. The link, faint, warning, focus and type colours below
+     are the starting points for each side (data-theme on the root): the view script measures the background the host
+     really gives (and the row tints over it) and moves each colour's lightness until text reaches 4.5:1 and icons and
+     the focus ring 3:1 there (McpPanelCore.themeColours), setting the result on the root. These values apply until
+     then, or where the script cannot measure. */
+  :root { --bg: var(--orca-bg, #2b2b2f); --fg: var(--orca-fg, #e8e8e8); --muted: var(--orca-muted, #a3a3a8);
+          --border: var(--orca-border, #3c3c42); --accent: var(--orca-accent, #009688);
+          --link: #5ad1c4; --faint: #9a9aa0; --warn: #f28b82; --focus: #5ad1c4;
+          --hover: rgba(127,127,127,.12); --hover-soft: rgba(127,127,127,.08);
+          --tip-bg: #121214; --tip-fg: #e8e8e8; --tip-border: #44444b;
+          --t-set: #5fa8e8; --t-preset: #b28be8; --t-model: #e8a95a; --t-plate: #74c29a; --t-slice: #00a991;
+          --font: var(--orca-font, "HarmonyOS Sans SC", "Segoe UI", system-ui, -apple-system, sans-serif); }
+  :root[data-theme="light"] { --link: #00695c; --faint: #5f5f64; --warn: #b3261e; --focus: #00695c;
+          --t-set: #1f6fb8; --t-preset: #7a4fc4; --t-model: #a8650f; --t-plate: #2e7d55; --t-slice: #00796b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--fg); font: 13px/1.4 var(--font); display: flex; flex-direction: column; overflow: hidden; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; text-align: inherit; }
+  /* The host injects element defaults after this sheet (WebViewHostDialog: every button on the accent colour, with a
+     border, padding and a hover filter). These win over that by specificity; any class rule below still wins. */
+  html body button { background: none; border: 0; border-radius: 0; padding: 0; margin: 0; color: inherit; font: inherit; text-align: inherit; filter: none; }
+  html body button:hover { filter: none; }
+  /* Keyboard focus: a ring in the theme's focus colour on every control (rows are role=button). Rules that name
+     :focus-visible stand alone: an engine without it drops only them (and keeps its default focus outline). */
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 3px; }
+  :focus:not(:focus-visible) { outline: none; }
+  #app { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .title { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-bottom: 1px solid var(--border); flex: none; }
+  .title .sp { flex: 1; }
+  .list { flex: 1; overflow-y: auto; overflow-x: hidden; }
+  .ibtn { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 3px; color: var(--muted); cursor: pointer; }
+  .ibtn:hover { background: var(--hover); color: var(--fg); }
+  .ibtn:focus-visible { background: var(--hover); color: var(--fg); }
+  .ibtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .title [data-tip]:hover::after { top: calc(100% + 6px); bottom: auto; }
+
+  svg.i { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .k-setting { color: var(--t-set); } .k-preset { color: var(--t-preset); } .k-model { color: var(--t-model); }
+  .k-plate { color: var(--t-plate); } .k-slice { color: var(--t-slice); } .k-refused { color: var(--warn); } .k-file { color: var(--faint); }
+
+  .empty { padding: 18px 14px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+  .empty button { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+  .offnote { border-bottom: 1px solid var(--border); }
+
+  /* Links that act: underlined in the link colour. Unavailable ones: faint, no underline, no pointer. */
+  .lnk { color: var(--link); text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; border-radius: 2px; }
+  .lnk.off { color: var(--faint); text-decoration: none; cursor: default; }
+  .lnk.no { color: var(--muted); }
+  .lnk:focus-visible { outline-offset: 1px; }
+
+  .group { border-bottom: 1px solid var(--border); }
+  .ghead { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; column-gap: 7px; min-height: 34px; padding: 0 10px; cursor: pointer; }
+  .ghead:hover { background: var(--hover-soft); }
+  .ghead .gt { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 7px; align-items: center; min-width: 0; min-height: 34px; text-align: left; }
+  .ghead .t { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .ghead .nm { min-width: 0; display: block; }
+  .ghead .nm[data-tip]:hover::after { left: 0; transform: none; white-space: normal; max-width: 240px; }
+  .ghead .name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ghead .res { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; display: inline-flex; gap: 5px; align-items: center; }
+  .ghead .res.stale { color: var(--faint); }
+  /* Restore: always shown (dimmed) on an older group, brighter on hover and focus. */
+  /* opacity .8 keeps the dimmed icon at 3:1 or more (3.65:1 on #363636, 3.18:1 on #eeeeee with the hosts' muted). */
+  .ghead .act { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 3px; color: var(--muted); opacity: .8; }
+  .ghead:hover .act { opacity: 1; }
+  .ghead .act:hover { background: var(--hover); color: var(--fg); }
+  .ghead .act:focus-visible { opacity: 1; background: var(--hover); color: var(--fg); }
+  .ghead .act.off { opacity: .3; cursor: default; }
+  .ghead .act svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .group.open .ghead .t { color: var(--muted); }
+  /* The restore question: a line under the group's title (the title stays). */
+  .ask { display: none; grid-column: 1 / -1; flex-direction: column; align-items: flex-start; gap: 2px; font-size: 12px; padding: 0 0 8px 41px; cursor: default; }
+  .ask .line { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+  .ask .note { color: var(--muted); font-size: 11.5px; }
+  .ask .bad { color: var(--warn); font-size: 11.5px; overflow-wrap: anywhere; }
+  .group.asking .ask, .group.busy .ask, .group.showerr .ask { display: flex; }
+  .group.asking .ghead .act, .group.busy .ghead .act, .group.showerr .ghead .act { display: none; }
+  .ask .wait { color: var(--muted); }
+
+  .body { display: none; padding: 0 0 8px; }
+  .group.open .body { display: block; }
+  .row { display: grid; grid-template-columns: 14px minmax(4em, 1fr) fit-content(60%); gap: 8px; align-items: center; min-height: 26px; padding: 3px 10px 3px 51px; cursor: pointer; }
+  .row:hover { background: var(--hover-soft); }
+  .row .l { color: var(--muted); min-width: 0; display: block; }
+  /* A long label wraps to a second line (and is cut after it), never truncated on one line. */
+  .row .l .lt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+  .row .v { color: var(--fg); text-align: right; overflow-wrap: anywhere; min-width: 0; }
+  .row .v .sw { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px; border: 1px solid var(--border); border-radius: 2px; }
+  .row .v .old { color: var(--faint); text-decoration: line-through; margin-right: 6px; }
+  .row .old { text-decoration: line-through; }
+  /* A long value goes on its own line under the label (the label keeps the row's width). */
+  .row.long { grid-template-columns: 14px minmax(0, 1fr); }
+  .row.long .v { grid-column: 2; text-align: left; }
+  .row .l .chg { display: block; color: var(--muted); font-size: 11px; line-height: 1.2; }
+  .row .l .chg .old { color: var(--muted); }
+  .row.refused .v { color: var(--warn); }
+  .row.stale .v, .row.stale .l .lt { color: var(--faint); }
+  .row.dropped .v { color: var(--faint); }
+  .more { display: none; padding: 0 10px 6px 73px; color: var(--muted); font-size: 12px; justify-content: space-between; gap: 8px; }
+  .row.open, .row.open + .more { background: var(--hover-soft); }
+  .row.open + .more { display: flex; }
+  .more .d { min-width: 0; overflow-wrap: anywhere; }
+  .more .d[data-tip]:hover::after { left: 0; transform: none; white-space: pre-line; max-width: 240px; }
+  .more .d.bad { color: var(--warn); }
+  .more .faint { color: var(--faint); white-space: nowrap; }
+  .group.newest .ghead .name { font-weight: 600; color: var(--fg); }
+  .group.older .ghead .name { color: var(--muted); }
+  .group.undone .ghead .name, .group.undone .ghead .res { color: var(--faint); font-weight: 400; text-decoration: line-through; text-decoration-color: rgba(127,127,127,.4); }
+  .group.undone .ghead { cursor: pointer; }
+  .group.restored .ghead { cursor: default; grid-template-columns: 34px minmax(0, 1fr) auto; }
+  .group.restored .ghead:hover { background: none; }
+  .group.restored .faint { color: var(--faint); }
+  .ghead .rl { display: flex; gap: 4px; align-items: baseline; min-width: 0; }
+  .ghead .rl .name { min-width: 0; }
+  .ghead .rl .sep { color: var(--muted); flex: none; }
+  .group.restored [data-tip]:hover::after { top: calc(100% + 6px); bottom: auto; }
+  [data-tip] { position: relative; }
+  [data-tip]:hover::after {
+    content: attr(data-tip); position: absolute; z-index: 5; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+    white-space: nowrap; padding: 3px 7px; border-radius: 3px; background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-border); font-size: 11.5px; pointer-events: none; font-weight: 400; text-decoration: none; }
+  /* A tag for the control the keyboard focused (P5): one element the view script places above the control, or below
+     it, inside the pane and never over the control (McpPanelCore.placeTip). */
+  .ftip { position: fixed; z-index: 6; left: 0; top: 0; max-width: 240px; padding: 3px 7px; border-radius: 3px; background: var(--tip-bg); color: var(--tip-fg);
+          border: 1px solid var(--tip-border); font-size: 11.5px; line-height: 1.35; pointer-events: none; overflow-wrap: anywhere; white-space: pre-line; }
+  .ftip[hidden] { display: none; }
+  .tip-left:hover::after { left: auto; right: 0; transform: none; }
+  .row .ic { display: inline-flex; }
+  /* After the general tag rule: a row's tag and the restore icon's long tag wrap inside the pane. */
+  .row .l[data-tip]:hover::after { left: 0; transform: none; white-space: normal; width: max-content; max-width: 200px; }
+  .ghead .act[data-tip]:hover::after { white-space: normal; width: max-content; max-width: 220px; }
+  /* A multi-line value's tag (value_tip: a few lines of a G-code template) keeps its line breaks, inside the pane. */
+  .row .v[data-tip]:hover::after { left: auto; right: 0; transform: none; white-space: pre-line; width: max-content; max-width: 240px; text-align: left; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-setting" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
+  <symbol id="i-preset" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></symbol>
+  <symbol id="i-model" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></symbol>
+  <symbol id="i-plate" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></symbol>
+  <symbol id="i-slice" viewBox="0 0 24 24"><path d="M3 8l9-4 9 4-9 4z"/><path d="M3 12l9 4 9-4M3 16l9 4 9-4"/></symbol>
+  <symbol id="i-refused" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.5"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M7 9l5-5 5 5M7 15l5 5 5-5"/></symbol>
+  <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M7 4l5 5 5-5M7 20l5-5 5 5"/></symbol>
+  <symbol id="i-restore" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1"/></symbol>
+</svg>
+<div id="app">
+  <div class="ftip" id="ftip" role="tooltip" hidden></div>
+  <div class="title">Assistant<span class="sp"></span><button type="button" class="ibtn tip-left" id="fold"></button><button type="button" class="ibtn tip-left" id="gear"></button></div>
+  <div class="list" id="list"></div>
+</div>
+<script id="panel-core">
+(function (root) {
+  'use strict';
+
+  var PROTOCOL_VERSION = 1;
+  var OFF_TEXT = 'The Remote API is off.'; // when the host sends no capabilities.off_text
+  var SETTINGS_LABEL = 'Remote API settings'; // when the host sends no capabilities.settings_label
+
+  function has(s) { return s !== null && s !== undefined && s !== ''; }
+
+  // history = {rows, groups}; returns groups newest first (start point, id 0, last),
+  // each {id, ts, time, restore, rows}. The view does not show the start point: it is only the target of
+  // "Restored to" (and of a restore through the API).
+  function groupRows(history) {
+    var rows = (history && history.rows) || [];
+    var metas = (history && history.groups) || [];
+    var byId = {};
+    var list = [];
+    function ensure(id, ts, time) {
+      if (!byId[id]) {
+        byId[id] = { id: id, ts: ts || 0, time: time || '', restore: null, rows: [] };
+        list.push(byId[id]);
+      }
+      return byId[id];
+    }
+    metas.forEach(function (m) {
+      var g = ensure(m.id, m.ts, m.time);
+      g.ts = m.ts || 0;
+      g.time = m.time || '';
+      g.restore = m.restore || null;
+    });
+    rows.forEach(function (r) {
+      var g = ensure(r.group, r.ts, r.time);
+      g.rows.push(r);
+    });
+    list.sort(function (a, b) {
+      if (a.id === 0 && b.id !== 0) return 1;
+      if (b.id === 0 && a.id !== 0) return -1;
+      if (a.ts !== b.ts) return b.ts - a.ts;
+      return b.id - a.id;
+    });
+    return list;
+  }
+
+  function singleText(r) {
+    var label = r.label || '';
+    var value = has(r.value) ? String(r.value) : '';
+    if (!value) return label;
+    return label + (has(r.before) ? ' → ' : ' ') + value;
+  }
+
+  function groupTitle(group) {
+    var all = group.rows || [];
+    if (!all.length) return '';
+    var rows = all.filter(function (r) { return r.kind !== 'slice' && r.kind !== 'refused'; });
+    if (!rows.length) {
+      // A connector's note ("Compared 3 options · nothing kept") names a group that holds no change.
+      for (var n = all.length - 1; n >= 0; n--) {
+        if (all[n].title_hint === 'note') return (all[n].label || '') + (has(all[n].value) ? ' \u00b7 ' + all[n].value : '');
+      }
+      var refused = all.filter(function (r) { return r.kind === 'refused'; });
+      var slices = all.filter(function (r) { return r.kind === 'slice'; });
+      if (slices.length) return 'Sliced ' + (slices[slices.length - 1].where || '').trim();
+      if (refused.length) return (refused[0].label || '') + ' not allowed';
+      return 'Sliced ' + (all[all.length - 1].where || '').trim();
+    }
+    var more = rows.length - 1;
+    var win = null;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].title_hint === 'added' || rows[i].title_hint === 'opened') { win = rows[i]; break; }
+    }
+    if (win) {
+      var t = (win.label || '') + (has(win.value) ? ' ' + win.value : '');
+      return more > 0 ? t + ' and ' + more + ' more' : t;
+    }
+    if (more === 0) return singleText(rows[0]);
+    return (rows[0].label || '') + ' and ' + more + ' more';
+  }
+
+  function formatDuration(sec) {
+    sec = Math.max(0, Math.round(sec));
+    if (sec < 60) return sec + 's';
+    var mins = Math.round(sec / 60);
+    if (mins < 60) return mins + 'm';
+    var h = Math.floor(mins / 60);
+    return h + 'h ' + (mins % 60) + 'm';
+  }
+
+  // allRows (optional): every row of the timeline, to tell whether the group's slice is out of date (sliceStale);
+  // staleUpTo (optional): rows up to this id are out of date (a change the page made itself, like a revert);
+  // sliceValid (optional): the host's slice_valid (see sliceStale).
+  function groupResult(group, allRows, staleUpTo, sliceValid) {
+    var rows = group.rows || [];
+    var text = '';
+    var warn = false;
+    var last = null;
+    rows.forEach(function (r) {
+      if (r.kind === 'refused' || has(r.error)) warn = true;
+      if (r.kind === 'slice' && r.result && typeof r.result.seconds === 'number') {
+        text = formatDuration(r.result.seconds);
+        last = r;
+      }
+    });
+    var out = { text: text, warn: warn };
+    if (allRows) {
+      out.stale = !!last && sliceStale(last, allRows, staleUpTo, sliceValid);
+      // Only the newest result says "out of date" in words; an older group's result is faint (it is history).
+      var newest = latestSlice(allRows);
+      out.current = !!last && !!newest && newest.id === last.id;
+    }
+    return out;
+  }
+
+  // A slice result is out of date once anything changed after it: a later setting, preset, model or plate row (a
+  // refusal, a note or another slice changes nothing), or a change the page made itself (staleUpTo: rows up to that
+  // id were there when the user reverted or restored something), or, for the newest result only, the host saying it
+  // no longer holds (sliceValid === false: the host's slice_valid, which also follows the user's own edits, which add
+  // no row). Without sliceValid (a host that does not send it) the rows alone decide.
+  var CHANGE_KINDS = { setting: 1, preset: 1, model: 1, plate: 1 };
+  function sliceStale(row, allRows, staleUpTo, sliceValid) {
+    if (!row || row.kind !== 'slice' || !row.result || has(row.error)) return false;
+    if (typeof staleUpTo === 'number' && row.id <= staleUpTo) return true;
+    var rs = allRows || [];
+    if (sliceValid === false) {
+      var newest = latestSlice(rs);
+      if (newest && newest.id === row.id) return true;
+    }
+    for (var i = 0; i < rs.length; i++) {
+      var r = rs[i];
+      if (later(r, row) && CHANGE_KINDS[r.kind] && !has(r.error)) return true;
+    }
+    return false;
+  }
+  // r came after row: a later time, or the same second and a later id.
+  function later(r, row) {
+    var a = Number(r.ts) || 0, b = Number(row.ts) || 0;
+    return a > b || (a === b && r.id > row.id);
+  }
+  // The newest slice result of the timeline (the one that would describe the plate now), or null.
+  function latestSlice(allRows) {
+    var best = null;
+    (allRows || []).forEach(function (r) {
+      if (r.kind === 'slice' && r.result && !has(r.error) && (!best || later(r, best))) best = r;
+    });
+    return best;
+  }
+
+  // The rows of a group in the order the page lists them: changes and results as they came, refusals last.
+  function orderedRows(group) {
+    var rows = (group && group.rows) || [];
+    return rows.filter(function (r) { return r.kind !== 'refused'; }).concat(rows.filter(function (r) { return r.kind === 'refused'; }));
+  }
+
+  var NUM_RE = /^\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*(.*?)\s*$/;
+  function parseNum(v) {
+    var m = NUM_RE.exec(String(v));
+    if (!m) return null;
+    var n = Number(m[1]);
+    return isFinite(n) ? { n: n, unit: m[2] } : null;
+  }
+  // Numbers match within 1e-6 relative (same unit text required); anything else exactly.
+  function sameValue(a, b) {
+    var x = parseNum(a), y = parseNum(b);
+    if (x && y) {
+      if (x.unit !== y.unit) return false;
+      return Math.abs(x.n - y.n) <= 1e-6 * Math.max(Math.abs(x.n), Math.abs(y.n), 1e-12);
+    }
+    return String(a) === String(b);
+  }
+
+  // A colour value (#RGB, #RRGGBB or #RRGGBBAA, as filament colour rows carry it): the CSS colour, else ''.
+  var COLOUR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+  function colourOf(v) {
+    var t = has(v) ? String(v).trim() : '';
+    return COLOUR_RE.test(t) ? t : '';
+  }
+
+  function offText(caps) {
+    return caps && has(caps.off_text) ? String(caps.off_text) : OFF_TEXT;
+  }
+
+  // The settings icon's hover tag.
+  function settingsLabel(caps) {
+    return caps && has(caps.settings_label) ? String(caps.settings_label) : SETTINGS_LABEL;
+  }
+  // The off line's link: "Open the " + the label. An ordinary capitalised first word is lower-cased ("Assistant
+  // settings" -> "Open the assistant settings"); a name keeps its capitals: a first word with other capitals
+  // ("OrcaSlicer MCP settings") or one followed by an acronym ("Remote API settings").
+  function settingsLink(caps) {
+    var l = settingsLabel(caps);
+    var words = l.split(' ');
+    var plain = /^[A-Z][a-z]+$/.test(words[0]) && !/^[A-Z]{2,}$/.test(words[1] || '');
+    return 'Open the ' + (plain ? l.charAt(0).toLowerCase() + l.slice(1) : l);
+  }
+
+  function liveEntry(row, live) {
+    return live && Object.prototype.hasOwnProperty.call(live, row.id) ? live[row.id] : null;
+  }
+
+  // The value a row shows. tracked (the host's capabilities.tracked_live): the host sends live entries only for the
+  // rows it tracks (the latest row of each setting, ruling R43), so any row with an entry shows it; without it, only
+  // the newest group's rows do (isNewest).
+  // A row the host marks dropped (the assistant's own preset switch dropped its edit) shows the value it set with a
+  // note, never a live value and never "changed by you".
+  function liveDisplay(row, live, isNewest, tracked) {
+    var shown = has(row.value) ? String(row.value) : '';
+    if (row.dropped === true) return { value: shown, note: 'dropped by a preset switch' };
+    var e = (tracked || isNewest) ? liveEntry(row, live) : null;
+    if (!e) return { value: shown, note: '' };
+    if (!e.present) return { value: shown, note: 'removed since' };
+    // The user put the setting back to what it was before the assistant changed it (for example with OrcaSlicer's
+    // own reset arrow beside the setting): that undoes the assistant's change rather than making a new one.
+    if (!sameValue(e.value, shown) && has(row.before) && sameValue(e.value, String(row.before))) {
+      return { value: String(e.value), note: 'set back by you' };
+    }
+    if (!sameValue(e.value, shown)) return { value: String(e.value), note: 'changed by you' };
+    return { value: shown, note: '' };
+  }
+
+  // canRestore (optional, default true): the host offers restore points (capabilities.restore); without them the
+  // reason does not send the user to one.
+  function undoState(row, live, isNewest, tracked, canRestore) {
+    var again = canRestore === false ? 'Changed again since' : 'Changed again since; restore an earlier point instead';
+    if (!row.undo) return { available: false, why: '' };
+    if (has(row.undone_at)) return { available: false, why: 'Reverted at ' + row.undone_at };
+    // The assistant's own preset switch dropped the edit (the host's dropped flag): nothing of it is left to undo.
+    if (row.dropped === true) {
+      return { available: false, why: canRestore === false ? 'Dropped by a preset switch' : 'Dropped by a preset switch; restore an earlier point instead' };
+    }
+    // The assistant changed the same setting again later (the host's superseded flag): undoing this row would
+    // overwrite that change.
+    if (row.superseded === true) return { available: false, why: again };
+    var e = liveEntry(row, live);
+    if (e) {
+      if (!e.present) {
+        var name = row.where || row.value || row.label || 'It';
+        return { available: false, why: name + ' is no longer on the plate' };
+      }
+      if (!sameValue(e.value, has(row.value) ? String(row.value) : '') && has(row.before) && sameValue(e.value, String(row.before))) {
+        return { available: false, why: 'Already back to ' + String(row.before) };
+      }
+      if (!sameValue(e.value, has(row.value) ? String(row.value) : '')) {
+        return {
+          available: false,
+          why: (tracked || isNewest) ? 'You changed it since' : again
+        };
+      }
+    }
+    return { available: true, why: '' };
+  }
+
+  // ---- Colours (polish P2): measured against the backgrounds the host really gives -------------------------------
+  // A CSS colour ("#rgb", "#rrggbb", "#rrggbbaa", "rgb(...)", "rgba(...)") as [r, g, b, a], or null.
+  function parseColour(s) {
+    var t = String(s === null || s === undefined ? '' : s).trim(), m;
+    if ((m = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(t))) return [parseInt(m[1] + m[1], 16), parseInt(m[2] + m[2], 16), parseInt(m[3] + m[3], 16), 1];
+    if ((m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})?$/i.exec(t)))
+      return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16), m[4] ? parseInt(m[4], 16) / 255 : 1];
+    if ((m = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/i.exec(t))) {
+      var a = m[4] === undefined ? 1 : (/%$/.test(m[4]) ? parseFloat(m[4]) / 100 : parseFloat(m[4]));
+      return [Number(m[1]), Number(m[2]), Number(m[3]), a];
+    }
+    return null;
+  }
+  function hexOf(c) {
+    return '#' + c.slice(0, 3).map(function (v) { var h = Math.max(0, Math.min(255, Math.round(v))).toString(16); return h.length < 2 ? '0' + h : h; }).join('');
+  }
+  // fg (with its alpha) laid over an opaque bg.
+  function over(fg, bg) {
+    var a = fg.length > 3 ? fg[3] : 1;
+    return [fg[0] * a + bg[0] * (1 - a), fg[1] * a + bg[1] * (1 - a), fg[2] * a + bg[2] * (1 - a), 1];
+  }
+  function channel(v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
+  // WCAG 2 relative luminance and contrast ratio.
+  function luminance(c) { return 0.2126 * channel(c[0]) + 0.7152 * channel(c[1]) + 0.0722 * channel(c[2]); }
+  function contrast(a, b) {
+    var x = luminance(a), y = luminance(b);
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  }
+  // The backgrounds a colour of the page sits on: the host's, and the same under the hover and open-row tints
+  // (--hover-soft and --hover: mid grey at 8 % and 12 %).
+  var TINTS = [0.08, 0.12];
+  function backgroundsOf(bg) {
+    return [bg.slice(0, 3)].concat(TINTS.map(function (a) { return over([127, 127, 127, a], bg).slice(0, 3); }));
+  }
+  function minContrast(c, bgs) {
+    var m = Infinity;
+    bgs.forEach(function (b) { m = Math.min(m, contrast(c, b)); });
+    return m;
+  }
+  function toHsl(c) {
+    var r = c[0] / 255, g = c[1] / 255, b = c[2] / 255;
+    var mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, h = 0, sat = 0, d = mx - mn;
+    if (d > 0) {
+      sat = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+      h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      h /= 6;
+    }
+    return [h, sat, l];
+  }
+  function fromHsl(h, sat, l) {
+    function f(p, q, t) {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    }
+    if (sat === 0) return [Math.round(l * 255), Math.round(l * 255), Math.round(l * 255)];
+    var q = l < 0.5 ? l * (1 + sat) : l + sat - l * sat, p = 2 * l - q;
+    return [Math.round(f(p, q, h + 1 / 3) * 255), Math.round(f(p, q, h) * 255), Math.round(f(p, q, h - 1 / 3) * 255)];
+  }
+  // base as it is when it reaches target on every background, else its lightness moved away from them (darker on a
+  // light background, lighter on a dark one) until it does.
+  function readable(base, bgs, target) {
+    var c = base.slice(0, 3).map(Math.round);
+    if (minContrast(c, bgs) >= target) return c;
+    var light = contrast([0, 0, 0], bgs[0]) >= contrast([255, 255, 255], bgs[0]);
+    var hsl = toHsl(c);
+    for (var i = 1; i <= 100; i++) {
+      var l = light ? hsl[2] - i / 100 : hsl[2] + i / 100;
+      if (l < 0 || l > 1) break;
+      var cand = fromHsl(hsl[0], hsl[1], l);
+      if (minContrast(cand, bgs) >= target) return cand;
+    }
+    return light ? [0, 0, 0] : [255, 255, 255];
+  }
+  // The starting points per side (the CSS defaults) and the ratio each must reach: text 4.5:1 (4.6 kept, for the
+  // engine's own rounding of the tints), icons and the focus ring 3:1 (WCAG 1.4.3, 1.4.11).
+  var THEME_BASE = {
+    dark:  { link: '#5ad1c4', faint: '#9a9aa0', warn: '#f28b82', focus: '#5ad1c4',
+             't-set': '#5fa8e8', 't-preset': '#b28be8', 't-model': '#e8a95a', 't-plate': '#74c29a', 't-slice': '#00a991' },
+    light: { link: '#00695c', faint: '#5f5f64', warn: '#b3261e', focus: '#00695c',
+             't-set': '#1f6fb8', 't-preset': '#7a4fc4', 't-model': '#a8650f', 't-plate': '#2e7d55', 't-slice': '#00796b' }
+  };
+  var TEXT_RATIO = 4.6, ICON_RATIO = 3.1;
+  // bg: the background the host gives (any CSS colour). Returns {theme: 'light'|'dark', vars: {name: '#rrggbb'}}, or
+  // null when bg is not an opaque colour.
+  function themeColours(bg) {
+    var b = parseColour(bg);
+    if (!b || b[3] < 0.99) return null;
+    var bgs = backgroundsOf(b);
+    var theme = contrast([0, 0, 0], b) >= contrast([255, 255, 255], b) ? 'light' : 'dark';
+    var base = THEME_BASE[theme], vars = {};
+    Object.keys(base).forEach(function (k) {
+      var ratio = k === 'link' || k === 'faint' || k === 'warn' ? TEXT_RATIO : ICON_RATIO;
+      vars[k] = hexOf(readable(parseColour(base[k]), bgs, ratio));
+    });
+    return { theme: theme, vars: vars };
+  }
+
+  // ---- Keyboard tooltips (polish P5) ------------------------------------------------------------------------------
+  // Where the tag of a focused control goes: above it when that fits inside the view, else below, else on the side
+  // with more room; never over the control. Horizontally centred on it and kept inside the view. ctrl = {left, top,
+  // right, bottom}, size = {w, h} of the tag, view = {w, h}. Returns {left, top, width, place}.
+  function placeTip(ctrl, size, view, gap, margin) {
+    gap = typeof gap === 'number' ? gap : 6;
+    margin = typeof margin === 'number' ? margin : 4;
+    var w = Math.min(size.w, Math.max(0, view.w - 2 * margin));
+    var left = (ctrl.left + ctrl.right) / 2 - w / 2;
+    left = Math.max(margin, Math.min(left, view.w - margin - w));
+    var above = ctrl.top - gap - size.h, below = ctrl.bottom + gap, top, place;
+    if (above >= margin) { top = above; place = 'above'; }
+    else if (below + size.h <= view.h - margin) { top = below; place = 'below'; }
+    else if (ctrl.top >= view.h - ctrl.bottom) { top = above; place = 'above'; }
+    else { top = below; place = 'below'; }
+    return { left: Math.round(left), top: Math.round(top), width: Math.round(w), place: place };
+  }
+
+  root.McpPanelCore = {
+    PROTOCOL_VERSION: PROTOCOL_VERSION,
+    groupRows: groupRows,
+    groupTitle: groupTitle,
+    groupResult: groupResult,
+    sliceStale: sliceStale,
+    latestSlice: latestSlice,
+    orderedRows: orderedRows,
+    liveDisplay: liveDisplay,
+    undoState: undoState,
+    sameValue: sameValue,
+    colourOf: colourOf,
+    offText: offText,
+    settingsLabel: settingsLabel,
+    settingsLink: settingsLink,
+    parseColour: parseColour,
+    contrast: contrast,
+    backgroundsOf: backgroundsOf,
+    themeColours: themeColours,
+    placeTip: placeTip
+  };
+})(window);
+</script>
+<script id="panel-view">
+(function () {
+  'use strict';
+  var Core = window.McpPanelCore;
+  var TIP = { setting: 'Setting', preset: 'Preset', model: 'Model', plate: 'Plate', slice: 'Slice result', refused: 'Refused', file: 'File' };
+  var history = { rows: [], groups: [] };
+  var caps = { restore: false, open_settings: true, settings_hint: '', off_text: '', settings_label: '', reveal: false, tracked_live: false };
+  var restoredTo = null, canUndoRestore = false, restoreFailed = false;
+  var live = {};
+  var api = 'on';
+  var openGroups = {};          // group id -> bool
+  var newestSeen = null;        // newest group id at the last render
+  var openRows = {};            // row id -> bool
+  var pendingUndo = {};         // row id -> 'busy'
+  var undoError = {};           // row id -> reason
+  var revertedHere = {};        // row id -> true (ok result, until history catches up)
+  var asking = null;            // group id with confirm showing
+  var restoreBusy = null;       // group id | 'undo'
+  var restoreError = {};        // group id | 'undo' -> reason
+  var staleUpTo = null;         // slice rows up to this id are out of date (the user reverted or restored since)
+  var sliceValid = null;        // the host's slice_valid: false = the newest slice result no longer holds; null = not sent
+  var handOpened = {};          // group id -> true: the user opened it (a click or Expand all); it stays open
+  var restoreUndoneAt = null;   // newest row id when the user undid a restore: "Restore undone" until a newer row
+  var focusNext = null;         // data-fk of the control to focus: kept until a render finds it (or 5 renders pass)
+  var focusTries = 0;
+  var kbFocus = false;          // the last focus came from the keyboard (a key was pressed since the last click)
+  var themeBg = null;           // the background the colours were last measured on
+  var groups = [];
+  var READY_RETRY_MS = 500, READY_RETRIES = 20;
+  var gotHistory = false, readyTries = 0, readyTimer = null;
+
+  function esc(s) { return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function has(s) { return s !== null && s !== undefined && s !== ''; }
+  function send(msg) { try { if (window.orca && window.orca.postMessage) window.orca.postMessage(msg); } catch (e) {} }
+  function icon(k) { return '<svg class="i k-' + k + '" aria-hidden="true"><use href="#i-' + k + '"/></svg>'; }
+
+  // The page never prints itself (a web view's Ctrl+P would open a print sheet over the panel).
+  try { window.print = function () {}; } catch (e) {}
+
+  // Link, faint, warning, focus and type colours follow the background the host really gives (its --orca-bg can be
+  // light or dark, and any shade): the side (data-theme), then each colour measured against it and its row tints
+  // (Core.themeColours), set on the root. Measured again only when the background changes (a theme switch).
+  function applyTheme() {
+    try {
+      if (!window.getComputedStyle || !document.body || !document.documentElement) return;
+      var bg = window.getComputedStyle(document.body).backgroundColor || '';
+      if (bg === themeBg) return;
+      var t = Core.themeColours(bg);
+      if (!t) return;
+      themeBg = bg;
+      var rootEl = document.documentElement;
+      if (rootEl.getAttribute('data-theme') !== t.theme) rootEl.setAttribute('data-theme', t.theme);
+      if (rootEl.style && rootEl.style.setProperty)
+        Object.keys(t.vars).forEach(function (k) { rootEl.style.setProperty('--' + k, t.vars[k]); });
+    } catch (e) {}
+  }
+
+  function isNewest(g) { return groups.length && groups[0].id === g.id; }
+  // The groups the list shows: every real group, newest first. The start point (id 0) stays in groups (the
+  // "Restored to" line names its time) but has no row of its own.
+  function shownGroups() { return groups.filter(function (g) { return g.id !== 0; }); }
+  // A setting row the host can find in its settings sidebar (capabilities.reveal and the row's reveal flag).
+  function revealable(r) { return caps.reveal && r.reveal === true; }
+  function rowById(id) {
+    var rs = history.rows;
+    for (var i = 0; i < rs.length; i++) if (rs[i].id === id) return rs[i];
+    return null;
+  }
+  function maxRowId() {
+    var m = 0;
+    history.rows.forEach(function (r) { if (typeof r.id === 'number' && r.id > m) m = r.id; });
+    return m;
+  }
+  function isUndone(g) {
+    if (restoredTo === null || restoredTo === undefined) return false;
+    if (restoreFailed) return false; // the host marked nothing undone
+    if (g.id === restoredTo) return false;
+    var t = null;
+    groups.forEach(function (x) { if (x.id === restoredTo) t = x; });
+    if (restoredTo === 0) return g.id !== 0;
+    if (!t) return false;
+    return g.id !== 0 && (g.ts > t.ts || (g.ts === t.ts && g.id > t.id));
+  }
+  function groupsUndoneBy(g) {
+    return groups.filter(function (x) {
+      if (x.id === g.id) return false;
+      if (g.id === 0) return x.id !== 0;
+      return x.id !== 0 && (x.ts > g.ts || (x.ts === g.ts && x.id > g.id));
+    });
+  }
+  function savedToDisk(r) { return r.on_disk === true; }
+  // The preset a setting row was written to ("0.20mm Standard @Printer (unsaved)") goes to the hover tag: the line
+  // itself says only "Was X".
+  function whereInTip(r) { return has(r.where) && (r.reveal === true || /\(unsaved\)$/.test(String(r.where))); }
+  function detailText(r, disp) {
+    var parts = [];
+    var b = has(r.before) ? String(r.before) : '';
+    if (disp.note === 'changed by you' && b) {
+      parts.push('Assistant set ' + r.value + ' \u00b7 was ' + b);
+      return parts.join(' \u00b7 ');
+    }
+    if (disp.note === 'set back by you') return 'Assistant set ' + r.value + ' \u00b7 you set it back';
+    if (b) parts.push('Was ' + b);
+    if (has(r.where) && !whereInTip(r)) parts.push(r.where);
+    return parts.join(' \u00b7 ');
+  }
+  function undoTip(r) {
+    if (has(r.undo.tip)) return r.undo.tip;
+    if (has(r.before)) return r.undo.verb + ': ' + r.label + ' back to ' + r.before;
+    return r.undo.verb + ' ' + (has(r.value) ? r.value : r.label);
+  }
+  // What a click on the row does, for its hover tag.
+  function rowTip(r) {
+    if (r.undo && revealable(r)) return 'Show what it was, undo it, and find it in settings';
+    if (r.undo) return 'Show what it was and undo it';
+    if (revealable(r)) return 'Show what it was and find it in settings';
+    return 'Show details';
+  }
+
+  // Filament colour rows: a small swatch of the colour shown beside it (the value is validated as #hex first).
+  function swatch(r, value) {
+    if (r.kind !== 'setting') return '';
+    var c = Core.colourOf(value);
+    return c ? '<span class="sw" style="background:' + c + '"></span>' : '';
+  }
+
+  function rowHtml(r, g, newest) {
+    var reverted = has(r.undone_at) || !!revertedHere[r.id];
+    // A reverted row shows what it undid, whatever the live value says: right after Revert the live message (the
+    // earlier value) can come before the history that marks the row undone, and must not read "changed by you".
+    var disp = reverted ? { value: has(r.value) ? String(r.value) : '', note: '' } : Core.liveDisplay(r, live, newest, caps.tracked_live);
+    var detail = detailText(r, disp);
+    var kind = r.kind === 'refused' || (r.kind === 'slice' && has(r.error)) ? 'refused' : r.kind;
+    var stale = Core.sliceStale(r, history.rows, staleUpTo, sliceValid);
+    var latest = stale ? Core.latestSlice(history.rows) : null;
+    var staleNote = stale && latest && latest.id === r.id;
+    var rc = (kind === 'refused' ? ' refused' : '') + (stale ? ' stale' : '') + (reverted ? ' reverted' : '') + (r.dropped === true && !reverted ? ' dropped' : '');
+    var isOpen = !!openRows[r.id];
+    var open = isOpen ? ' open' : '';
+    var tail = '';
+    var errLine = undoError[r.id];
+    if (r.undo) {
+      var st = Core.undoState(r, live, newest, caps.tracked_live, caps.restore);
+      if (reverted) {
+        tail = '<span class="faint">Reverted</span>';
+        if (has(r.undone_at)) tail = '<span class="faint tip-left" data-tip="Reverted at ' + esc(r.undone_at) + '">Reverted</span>';
+      } else if (pendingUndo[r.id]) {
+        tail = '<span class="faint">Reverting\u2026</span>';
+      } else if (st.available) {
+        tail = '<button type="button" class="lnk tip-left" data-undo="' + r.id + '" data-fk="u:' + r.id + '" data-tip="' + esc(undoTip(r)) + '">' + esc(r.undo.verb) + '</button>';
+      } else {
+        tail = '<button type="button" class="lnk off tip-left" aria-disabled="true" data-fk="u:' + r.id + '" data-tip="' + esc(st.why) + '" aria-label="' +
+          esc(r.undo.verb + ' (unavailable: ' + st.why + ')') + '">' + esc(r.undo.verb) + '</button>';
+      }
+    }
+    // A multi-line value (a G-code template) carries a few of its lines for the hover tags (value_tip, before_tip).
+    var dTip = whereInTip(r) ? ' data-tip="' + esc(r.where) + '"' : (has(r.before_tip) && has(r.before) ? ' data-tip="' + esc(r.before_tip) + '"' : '');
+    var more = '<div class="more"><span class="d"' + dTip + '>' + esc(detail) + '</span>' + tail + '</div>';
+    if (errLine) more = '<div class="more"><span class="d bad">' + esc(errLine) + '</span>' + tail + '</div>';
+    else if (kind === 'refused' && has(r.error) && !detail) more = '<div class="more"><span class="d">' + esc(r.error) + '</span>' + tail + '</div>';
+    // A reverted row shows what is there now (the earlier value); the undone value, struck through, goes under the
+    // label so the label keeps its width.
+    var value = esc(disp.value);
+    var shownText = disp.value;
+    var noteHtml = '';
+    var vTip = '';
+    if (reverted) {
+      noteHtml = '<span class="chg"><s class="old">' + esc(disp.value) + '</s> reverted</span>';
+      value = has(r.before) ? swatch(r, r.before) + esc(r.before) : '';
+      shownText = has(r.before) ? r.before : '';
+      vTip = has(r.before) && has(r.before_tip) ? r.before_tip : '';
+    } else {
+      value = swatch(r, disp.value) + value;
+      if (has(r.value_tip) && disp.value === String(has(r.value) ? r.value : '')) vTip = r.value_tip;
+      else if (has(r.before_tip) && has(r.before) && disp.value === String(r.before)) vTip = r.before_tip;
+    }
+    var note = reverted ? '' : (disp.note || (staleNote ? 'out of date' : ''));
+    if (note) noteHtml = '<span class="chg">' + esc(note) + '</span>';
+    if (String(shownText || '').length > 18) rc += ' long';
+    var label = r.label + (has(shownText) ? ' ' + shownText : '') + (note ? ', ' + note : '') + (reverted ? ', reverted' : '');
+    return '<div class="row' + rc + open + '" data-row="' + r.id + '" data-fk="r:' + r.id + '" role="button" tabindex="0" aria-expanded="' + isOpen + '" aria-label="' + esc(label) + '">' +
+      '<span class="ic" data-tip="' + esc(TIP[kind] || '') + '">' + icon(kind) + '</span>' +
+      '<span class="l"' + (!isOpen ? ' data-tip="' + esc(rowTip(r)) + '"' : '') + '><span class="lt">' + esc(r.label) + '</span>' +
+      noteHtml + '</span><span class="v"' + (vTip ? ' data-tip="' + esc(vTip) + '"' : '') + '>' + value + '</span></div>' + more;
+  }
+
+  function groupHtml(g, idx) {
+    var newest = idx === 0;
+    var undone = isUndone(g);
+    var open = !!openGroups[g.id] && !undone;
+    var res = Core.groupResult(g, history.rows, staleUpTo, sliceValid);
+    var cls = 'group' + (open ? ' open' : '') + (undone ? ' undone' : '') + (newest ? ' newest' : ' older');
+    var restorable = caps.restore && !newest && !undone && g.restore;
+    var ask = '';
+    if (restoreBusy === g.id) {
+      cls += ' busy';
+      ask = '<div class="ask"><span class="line wait">Restoring\u2026</span></div>';
+    } else if (restoreError[g.id]) {
+      cls += ' showerr';
+      ask = '<div class="ask"><span class="line"><span class="bad">' + esc(restoreError[g.id]) + '</span><button type="button" class="lnk no" data-dismiss="' + g.id + '" data-fk="d:' + g.id + '">OK</button></span></div>';
+    } else if (asking === g.id) {
+      cls += ' asking';
+      var notes = '';
+      var undoneGroups = groupsUndoneBy(g);
+      var disk = undoneGroups.some(function (x) { return x.rows.some(savedToDisk); });
+      if (disk) notes += '<span class="note">Files and presets saved to disk stay.</span>';
+      notes += '<span class="note">Your own changes since then are undone too.</span>';
+      ask = '<div class="ask" role="group" aria-label="' + esc('Restore to ' + g.time + '?') + '"><span class="line">Restore to ' + esc(g.time) + '? ' +
+        '<button type="button" class="lnk" data-yes="' + g.id + '" data-fk="y:' + g.id + '">Yes</button>' +
+        '<button type="button" class="lnk no" data-no="' + g.id + '" data-fk="n:' + g.id + '">No</button></span>' + notes + '</div>';
+    }
+    var act = '';
+    if (restorable && !ask) {
+      var ok = g.restore.available;
+      var tip = ok ? 'Restore the project to how it was at ' + g.time + ' (undoes later changes)' : (g.restore.why || 'No restore point here');
+      act = '<button type="button" class="act tip-left' + (ok ? '' : ' off') + '" ' + (ok ? 'data-ask="' + g.id + '"' : 'aria-disabled="true"') +
+        ' data-fk="a:' + g.id + '" data-tip="' + esc(tip) + '" aria-label="' + esc(tip) + '"><svg aria-hidden="true"><use href="#i-restore"/></svg></button>';
+    }
+    var resText = res.text + (res.text && res.stale && res.current ? ' \u00b7 out of date' : '');
+    var resHtml = '<span class="res' + (res.stale ? ' stale' : '') + '"' + (res.stale ? ' data-tip="Out of date: something changed after this slice"' : '') + '>' +
+      (res.warn ? icon('refused') : '') + esc(resText) + '</span>';
+    var title = Core.groupTitle(g);
+    return '<div class="' + cls + '" data-g="' + g.id + '"><div class="ghead" data-toggle="' + g.id + '">' +
+      '<button type="button" class="gt" data-toggle="' + g.id + '" data-fk="g:' + g.id + '" aria-expanded="' + open + '" aria-label="' + esc(g.time + ' ' + title + (undone ? ', undone by the restore' : '')) + '">' +
+      '<span class="t">' + esc(g.time) + '</span><span class="nm" data-tip="' + esc(title) + '"><span class="name">' + esc(title) + '</span></span></button>' +
+      resHtml + act + ask + '</div><div class="body">' + Core.orderedRows(g).map(function (r) { return rowHtml(r, g, newest && !undone); }).join('') + '</div></div>';
+  }
+
+  function restoredLineHtml() {
+    if (restoredTo === null || restoredTo === undefined) {
+      // After the user undid a restore: a faint line until the next change.
+      if (restoreUndoneAt !== null && restoreUndoneAt === maxRowId())
+        return '<div class="group restored"><div class="ghead"><span class="t"></span><span class="rl"><span class="name faint">Restore undone</span></span></div></div>';
+      return '';
+    }
+    var t = '';
+    groups.forEach(function (g) { if (g.id === restoredTo) t = g.time; });
+    // Column 3 holds only the transient states; the Undo link follows the text in column 2 ("Restored to 10:31 ·
+    // Undo"), outside .name so its hover tag is not clipped by the ellipsis.
+    var right = '';
+    if (restoreBusy === 'undo') right = '<span class="ask" style="display:flex;grid-column:auto;padding:0"><span class="line wait">Restoring\u2026</span></span>';
+    else if (restoreError.undo) right = '<span class="ask" style="display:flex;grid-column:auto;padding:0"><span class="line"><span class="bad">' + esc(restoreError.undo) + '</span></span></span>';
+    var inline = canUndoRestore && restoreBusy === null && !restoreError.undo;
+    var lead = restoreFailed ? 'Couldn\'t restore to ' : 'Restored to ';
+    return '<div class="group restored"><div class="ghead"><span class="t"></span><span class="rl"><span class="name">' + esc(lead + t) + '</span>' +
+      (inline ? '<span class="sep">\u00b7</span><button type="button" class="lnk tip-left" data-undo-restore="1" data-fk="ur" data-tip="Go back to before the restore">Undo</button>' : '') +
+      '</span>' + right + '</div></div>';
+  }
+
+  function updateFold() {
+    var cand = shownGroups().filter(function (g) { return !isUndone(g); });
+    var allOpen = cand.length > 0 && cand.every(function (g) { return openGroups[g.id]; });
+    var f = document.getElementById('fold');
+    f.setAttribute('data-tip', allOpen ? 'Collapse all' : 'Expand all');
+    f.setAttribute('aria-label', allOpen ? 'Collapse all' : 'Expand all');
+    f.innerHTML = '<svg aria-hidden="true"><use href="#i-' + (allOpen ? 'collapse' : 'expand') + '"/></svg>';
+    f.style.visibility = shownGroups().length ? 'visible' : 'hidden';
+  }
+  function updateGear() {
+    var g = document.getElementById('gear');
+    var tip = caps.open_settings ? Core.settingsLabel(caps) : (caps.settings_hint || 'Settings');
+    g.setAttribute('data-tip', tip);
+    g.setAttribute('aria-label', tip);
+    g.innerHTML = '<svg aria-hidden="true"><use href="#i-gear"/></svg>';
+  }
+
+  // ---- The keyboard focus's tag (P5): placed by Core.placeTip inside the pane, never over the control.
+  var ftip = document.getElementById('ftip') || null;
+  function hideTip() {
+    if (!ftip) return;
+    ftip.hidden = true;
+    ftip.textContent = '';
+  }
+  // The control's tag: its own data-tip, or a row's (on its label while closed).
+  function tipText(el) {
+    if (!el || !el.getAttribute) return '';
+    var t = el.getAttribute('data-tip');
+    if (!t && el.querySelector) {
+      var l = el.querySelector('.l[data-tip]');
+      if (l) t = l.getAttribute('data-tip');
+    }
+    return t || '';
+  }
+  function showTip(el) {
+    if (!ftip || !el || !el.getBoundingClientRect) return;
+    var text = tipText(el);
+    if (!text) { hideTip(); return; }
+    var de = document.documentElement || {};
+    var vw = de.clientWidth || window.innerWidth || 0, vh = de.clientHeight || window.innerHeight || 0;
+    if (!vw || !vh) return;
+    ftip.textContent = text;
+    ftip.style.maxWidth = Math.max(60, Math.min(240, vw - 8)) + 'px';
+    ftip.style.left = '0px';
+    ftip.style.top = '0px';
+    ftip.hidden = false;
+    var r = el.getBoundingClientRect();
+    var pos = Core.placeTip({ left: r.left, top: r.top, right: r.right, bottom: r.bottom }, { w: ftip.offsetWidth, h: ftip.offsetHeight },
+                            { w: vw, h: vh }, 6, 4);
+    ftip.style.left = pos.left + 'px';
+    ftip.style.top = pos.top + 'px';
+  }
+
+  // Keyboard focus survives a render (the list is rebuilt): the control with the same data-fk gets it back, or the
+  // one an action asked for (focusNext).
+  function focusedKey() {
+    try {
+      var a = document.activeElement;
+      return a && a.getAttribute ? a.getAttribute('data-fk') : null;
+    } catch (e) { return null; }
+  }
+  // true when the control was found and focused.
+  function refocus(key) {
+    if (!key) return false;
+    try {
+      // Never take the keyboard from OrcaSlicer: only while the page itself has it (a live update after the user
+      // clicked into the sidebar must not pull focus back).
+      if (document.hasFocus && !document.hasFocus()) return false;
+      if (!document.querySelector) return false;
+      var el = document.querySelector('[data-fk="' + key + '"]');
+      if (el && el.focus) { el.focus(); return true; }
+    } catch (e) {}
+    return false;
+  }
+  // An action's focus target (focusNext) waits for the render that has it: after Yes on a restore, the "Restored to
+  // ... · Undo" line comes with the next history, and the host may hold the focus meanwhile (m15).
+  function placeFocus(keep, pending) {
+    if (refocus(keep)) { if (pending) { focusNext = null; focusTries = 0; } return; }
+    if (pending && ++focusTries > 5) { focusNext = null; focusTries = 0; }
+  }
+
+  function render() {
+    applyTheme();
+    hideTip();
+    var pending = focusNext;
+    var keep = pending || focusedKey();
+    groups = Core.groupRows(history);
+    var html = '';
+    if (api === 'off') {
+      html += '<div class="empty offnote">' + esc(Core.offText(caps)) + (caps.open_settings
+        ? ' <button type="button" data-settings="1" data-fk="set">' + esc(Core.settingsLink(caps)) + '</button>'
+        : (caps.settings_hint ? '<br>' + esc(caps.settings_hint) : '')) + '</div>';
+    }
+    var shown = shownGroups();
+    if (!shown.length) {
+      if (api !== 'off') html += '<div class="empty">When an assistant changes something, it shows up here.</div>';
+    } else {
+      html += restoredLineHtml();
+      html += shown.map(groupHtml).join(''); // index 0 is the newest group: the "Restored to" line is not one
+    }
+    var list = document.getElementById('list');
+    var top = list.scrollTop;
+    list.innerHTML = html;
+    list.scrollTop = top;
+    updateFold();
+    updateGear();
+    placeFocus(keep, pending);
+  }
+
+  function applyHistory(m) {
+    history = { rows: m.rows || [], groups: m.groups || [] };
+    var c = m.capabilities || {};
+    caps = { restore: !!c.restore, open_settings: c.open_settings !== false, settings_hint: c.settings_hint || '', off_text: c.off_text || '',
+             settings_label: c.settings_label || '', reveal: c.reveal === true, tracked_live: c.tracked_live === true };
+    restoredTo = has(m.restored_to) || m.restored_to === 0 ? m.restored_to : null;
+    restoreFailed = restoredTo !== null && m.restore_failed === true;
+    canUndoRestore = !!m.can_undo_restore;
+    sliceValid = typeof m.slice_valid === 'boolean' ? m.slice_valid : null;
+    gotHistory = true;
+    if (readyTimer !== null) { window.clearTimeout(readyTimer); readyTimer = null; }
+    var gs = Core.groupRows(history);
+    var newest = gs.length ? gs[0].id : null;
+    gs.forEach(function (g, i) { if (!(g.id in openGroups)) openGroups[g.id] = (i === 0); });
+    if (newest !== null && newest !== newestSeen && newestSeen !== null) {
+      openGroups[newest] = true;
+      // The latest group is open and older ones closed: the group that was newest closes now, unless the user opened
+      // it by hand (handOpened). Groups the user opened stay open.
+      if (!handOpened[newestSeen] && gs.some(function (g) { return g.id === newestSeen; })) openGroups[newestSeen] = false;
+    }
+    newestSeen = newest;
+    // rows that the host now reports as reverted no longer need the local mark
+    history.rows.forEach(function (r) { if (has(r.undone_at)) { delete revertedHere[r.id]; delete pendingUndo[r.id]; } });
+    if (asking !== null) {
+      var ag = null;
+      gs.forEach(function (g, i) { if (g.id === asking) ag = { g: g, newest: i === 0 }; });
+      if (!ag || ag.newest || !caps.restore || !ag.g.restore || !ag.g.restore.available || isUndone(ag.g)) asking = null;
+    }
+    render();
+    send({ action: 'live' });
+  }
+
+  function applyResult(m) {
+    if (m.action === 'undo') {
+      var id = m.row;
+      delete pendingUndo[id];
+      if (m.status === 'ok') { revertedHere[id] = true; delete undoError[id]; staleUpTo = Math.max(staleUpTo || 0, maxRowId()); }
+      else if (m.status === 'failed') { undoError[id] = m.reason || 'Could not revert'; openRows[id] = true; }
+    } else {
+      var key = m.action === 'undo_restore' ? 'undo' : m.group;
+      if (restoreBusy === key) restoreBusy = null;
+      if (m.status === 'failed') restoreError[key === undefined ? 'undo' : key] = m.reason || 'Could not restore';
+      // Where the keyboard goes: the restore's Undo line (it comes with the next history), or the error's OK.
+      if (m.action === 'restore' && m.status === 'ok') { focusNext = 'ur'; focusTries = 0; }
+      else if (m.action === 'restore' && m.status === 'failed' && key !== undefined) { focusNext = 'd:' + key; focusTries = 0; }
+      if (m.status === 'ok') staleUpTo = Math.max(staleUpTo || 0, maxRowId());
+      if (m.status === 'ok' && m.action === 'undo_restore') restoreUndoneAt = maxRowId();
+    }
+    render();
+  }
+
+  function liveSame(a, b) {
+    var ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    for (var i = 0; i < ka.length; i++) {
+      var x = a[ka[i]], y = b[ka[i]];
+      if (!y) return false;
+      if (!!x.present !== !!y.present) return false;
+      if (x.present && !Core.sameValue(x.value, y.value)) return false;
+    }
+    return true;
+  }
+
+  function receive(m) {
+    if (!m || typeof m !== 'object') return;
+    if (m.type === 'history') applyHistory(m);
+    else if (m.type === 'live') {
+      var nv = m.values || {};
+      // slice_valid in a live message is optional: without it the last one stays.
+      var sv = typeof m.slice_valid === 'boolean' ? m.slice_valid : sliceValid;
+      if (!liveSame(live, nv) || sv !== sliceValid) { live = nv; sliceValid = sv; render(); }
+    }
+    else if (m.type === 'state') { api = m.api === 'off' ? 'off' : 'on'; render(); }
+    else if (m.type === 'result') applyResult(m);
+  }
+  window.__mcpPanelReceive = receive;
+  if (window.orca && window.orca.onMessage) window.orca.onMessage(receive);
+
+  function ancestor(el, attr) {
+    while (el && el !== document) { if (el.getAttribute && el.hasAttribute(attr)) return el; el = el.parentNode; }
+    return null;
+  }
+  function toggleRow(rid) {
+    openRows[rid] = !openRows[rid];
+    // Opening a setting row also shows that setting in the host's settings sidebar (fire and forget).
+    var rr = openRows[rid] ? rowById(rid) : null;
+    if (rr && revealable(rr)) send({ action: 'reveal', row: rid });
+    focusNext = 'r:' + rid;
+    render();
+  }
+  // One click (or Enter / Space on a control): what it does.
+  function activate(target) {
+    var el;
+    // An unavailable control (a disabled restore icon or undo link) does nothing, and never toggles its group.
+    if (ancestor(target, 'aria-disabled')) return true;
+    if ((el = ancestor(target, 'data-undo'))) {
+      var id = Number(el.getAttribute('data-undo'));
+      pendingUndo[id] = 'busy'; delete undoError[id];
+      focusNext = 'r:' + id;
+      render(); send({ action: 'undo', row: id }); return true;
+    }
+    if (ancestor(target, 'data-undo-restore')) {
+      restoreBusy = 'undo'; delete restoreError.undo;
+      render(); send({ action: 'undo_restore' }); return true;
+    }
+    if ((el = ancestor(target, 'data-yes'))) {
+      var gid = Number(el.getAttribute('data-yes'));
+      asking = null; restoreBusy = gid; delete restoreError[gid];
+      focusNext = 'g:' + gid;
+      render(); send({ action: 'restore', group: gid }); return true;
+    }
+    if ((el = ancestor(target, 'data-no'))) { var nid = Number(el.getAttribute('data-no')); asking = null; focusNext = 'a:' + nid; render(); return true; }
+    if ((el = ancestor(target, 'data-dismiss'))) { var did = Number(el.getAttribute('data-dismiss')); delete restoreError[did]; focusNext = 'g:' + did; render(); return true; }
+    if ((el = ancestor(target, 'data-ask'))) { asking = Number(el.getAttribute('data-ask')); focusNext = 'n:' + asking; render(); return true; }
+    if (ancestor(target, 'data-settings')) { send({ action: 'open_settings' }); return true; }
+    if (ancestor(target, 'gear') || target.id === 'gear' || (target.closest && target.closest('#gear'))) {
+      if (caps.open_settings) send({ action: 'open_settings' });
+      return true;
+    }
+    if (target.closest && target.closest('#fold')) {
+      var cand = shownGroups().filter(function (g) { return !isUndone(g); });
+      var allOpen = cand.length > 0 && cand.every(function (g) { return openGroups[g.id]; });
+      cand.forEach(function (g) {
+        openGroups[g.id] = !allOpen;
+        if (allOpen) delete handOpened[g.id]; else handOpened[g.id] = true;
+      });
+      render(); return true;
+    }
+    if (target.closest && target.closest('.more')) return false;
+    if ((el = target.closest && target.closest('.row'))) { toggleRow(Number(el.getAttribute('data-row'))); return true; }
+    if (target.closest && target.closest('.ask')) return false;
+    if ((el = target.closest && target.closest('[data-toggle]'))) {
+      var tid = Number(el.getAttribute('data-toggle'));
+      if (asking === tid || restoreBusy === tid) return false;
+      openGroups[tid] = !openGroups[tid];
+      if (openGroups[tid]) handOpened[tid] = true; else delete handOpened[tid];
+      focusNext = 'g:' + tid;
+      render(); return true;
+    }
+    return false;
+  }
+  document.addEventListener('click', function (e) {
+    if (ancestor(e.target, 'data-undo')) e.stopPropagation();
+    activate(e.target);
+  });
+  // A click is not the keyboard: no focus tag, and an action's pending focus gives way to where the user went.
+  document.addEventListener('mousedown', function () { kbFocus = false; focusNext = null; focusTries = 0; hideTip(); });
+  document.addEventListener('focusin', function (e) { if (kbFocus) showTip(e.target); else hideTip(); });
+  document.addEventListener('focusout', function () { hideTip(); });
+  try {
+    var listEl = document.getElementById('list');
+    if (listEl && listEl.addEventListener) listEl.addEventListener('scroll', hideTip);
+    // Back from a dialog the host showed (a restore pumps one): the focus an action asked for.
+    if (window.addEventListener) window.addEventListener('focus', function () { if (focusNext && refocus(focusNext)) { focusNext = null; focusTries = 0; } });
+  } catch (e) {}
+  // Keyboard: Enter / Space on a row (role=button) opens it (buttons do that themselves); Esc answers No to the
+  // restore question, else closes the open row the focus is in; Ctrl+P / Ctrl+S never print or save the page.
+  document.addEventListener('keydown', function (e) {
+    var k = e.key;
+    if (k !== 'Shift' && k !== 'Control' && k !== 'Alt' && k !== 'Meta') kbFocus = true;
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (k === 'p' || k === 'P' || k === 's' || k === 'S')) {
+      if (e.preventDefault) e.preventDefault();
+      return;
+    }
+    var t = e.target || {};
+    if (k === 'Escape' || k === 'Esc') {
+      hideTip();
+      if (asking !== null) {
+        var gid = asking;
+        asking = null; focusNext = 'a:' + gid; render();
+        if (e.preventDefault) e.preventDefault();
+        return;
+      }
+      var rowEl = t.closest ? t.closest('.row') : null;
+      var rid = rowEl ? Number(rowEl.getAttribute('data-row')) : NaN;
+      if (isNaN(rid) && t.closest && t.closest('.more')) {
+        var u = t.getAttribute && (t.getAttribute('data-undo') || (t.getAttribute('data-fk') || '').replace(/^u:/, ''));
+        rid = Number(u);
+      }
+      if (!isNaN(rid) && openRows[rid]) {
+        openRows[rid] = false; focusNext = 'r:' + rid; render();
+        if (e.preventDefault) e.preventDefault();
+      }
+      return;
+    }
+    if ((k === 'Enter' || k === ' ' || k === 'Spacebar') && t.getAttribute && t.getAttribute('role') === 'button' && t.hasAttribute && t.hasAttribute('data-row')) {
+      if (e.preventDefault) e.preventDefault();
+      toggleRow(Number(t.getAttribute('data-row')));
+    }
+  });
+  // The host may miss the first ready (its message handler can register after the page's script ran): say it again
+  // every READY_RETRY_MS until the first history arrives, at most READY_RETRIES more times.
+  function retryReady() {
+    readyTimer = null;
+    if (gotHistory || readyTries >= READY_RETRIES) return;
+    readyTries++;
+    send({ action: 'ready' });
+    readyTimer = window.setTimeout(retryReady, READY_RETRY_MS);
+  }
+  render();
+  send({ action: 'ready' });
+  send({ action: 'live' });
+  if (!gotHistory) readyTimer = window.setTimeout(retryReady, READY_RETRY_MS);
+})();
+</script>
+</body>
+</html>

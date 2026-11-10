@@ -7,20 +7,20 @@ set(SLIC3R_APP_KEY "OrcaSlicer")
 if(NOT DEFINED BBL_INTERNAL_TESTING)
 set(BBL_INTERNAL_TESTING "0")
 endif()
-set(SoftFever_VERSION "2.4.2")
+set(SoftFever_VERSION "2.5.0")
 
 # orca-mcp: monotonically increasing fork release ordinal (the N in v<base>-mcp.N
 # release tags on MaxEllis/OrcaSlicer). The in-app update check compares this
 # against the latest GitHub release tag; scripts/cut-fork-release.sh bumps it
 # at release time. It is monotonic ACROSS base-version bumps (mcp.4 was 2.3.2).
-set(ORCA_MCP_RELEASE "10")
+set(ORCA_MCP_RELEASE "16")
 string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)"
        SoftFever_VERSION_MATCH ${SoftFever_VERSION})
 set(ORCA_VERSION_MAJOR ${CMAKE_MATCH_1})
 set(ORCA_VERSION_MINOR ${CMAKE_MATCH_2})
 set(ORCA_VERSION_PATCH ${CMAKE_MATCH_3})
 
-set(SLIC3R_VERSION "02.06.00.51")
+set(SLIC3R_VERSION "02.08.01.55")
 
 if (NOT DEFINED ORCA_UPDATER_SIG_KEY)
     set(ORCA_UPDATER_SIG_KEY "" CACHE STRING "Base64url encoded updater signature key")

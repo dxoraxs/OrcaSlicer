@@ -21,14 +21,14 @@ jobs:
   build:
     uses: ./.github/workflows/build_check_cache.yml
     with:
-      os: macos-14
+      os: macos-15
       arch: arm64
     secrets: inherit
 
   release:
     needs: build
     if: ${{ inputs.publish }}
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -50,7 +50,7 @@ jobs:
           mkdir dmg && cp -R OrcaSlicer/OrcaSlicer.app dmg/ && ln -s /Applications dmg/Applications
           dmg_name="OrcaSlicer_Mac_arm64_${version}.dmg"
           hdiutil create -volname "OrcaSlicer" -srcfolder dmg -ov -format UDZO "$dmg_name"
-          notes=$(printf '**%s** (commit %s)\n\nOrcaSlicer %s (MaxEllis MCP build) plus the dxoraxs patches:\n\n%s\n\nInstall with printer-biqu scripts/install-orca-dx.sh (removes the download quarantine; the app is ad-hoc signed).' \
+          notes=$(printf '**%s** (commit %s)\n\nOrcaSlicer %s (MaxEllis MCP build) built by the dxoraxs fork (no source changes since 2.5.0: projects and plates are upstream now):\n\n%s\n\nInstall with printer-biqu scripts/install-orca-dx.sh (removes the download quarantine; the app is ad-hoc signed).' \
             "$version" "${GITHUB_SHA:0:9}" "$base" "$(git log --no-merges --format='- %s' "${base}..HEAD" -- src)")
           # One rolling release: the Actions token may not create tags in this fork, but it may
           # replace assets of an existing release. The tag was created once by hand.

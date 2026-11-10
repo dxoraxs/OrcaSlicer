@@ -1,26 +1,12 @@
 # dxoraxs fork of OrcaSlicer (MaxEllis MCP build)
 
-`main` = the newest MaxEllis release tag (`v*-mcp.*`, branch `remote-api-242` upstream)
-plus our Remote API additions. Upstream code is untouched except the routes and declarations
-in `RemoteAPIController.*`; our handlers live in `src/slic3r/GUI/RemoteAPI/RemoteAPIDx.cpp`
-(and `handle_project_save` in the controller).
+`main` = the newest MaxEllis release tag (`v*-mcp.*`) plus this folder, two workflows and a
+README note. There are no source changes.
 
-## Remote API additions
-
-| Route | Body | Does |
-|-------|------|------|
-| `POST /api/v1/project/save` | `{"path"?, "overwrite"?}` | save the project as .3mf, no dialog; no path = in place |
-| `POST /api/v1/project/new` | `{"discard"?}` | empty project |
-| `POST /api/v1/project/open` | `{"path", "discard"?}` | open a .3mf as a project (models, plates, settings) |
-| `GET /api/v1/plates` | | plates with their objects, current index |
-| `POST /api/v1/plates` | `{"name"?}` | add a plate and select it |
-| `POST /api/v1/plates/select` | `{"index"}` | select a plate |
-| `DELETE /api/v1/plates/{index}` | | delete an empty plate (never the last) |
-| `POST /api/v1/objects/{id}/plate` | `{"index"}` | move an object to a plate |
-
-Nothing here may open a modal dialog (a modal blocks the GUI loop and every later API call
-times out): with unsaved changes, new/open answer 409 `unsaved_changes` unless `discard: true`.
-`/status` lists `project_save`, `project_open`, `plates` in `capabilities`.
+Until 2.4.2 the fork carried its own Remote API routes (project save/new/open, plates). Upstream
+shipped its own in `v2.4.2-mcp.13` to `mcp.15`, with different request bodies, so at
+`v2.5.0-mcp.16` ours were dropped: the merge commit takes upstream's tree as it is. The old
+handlers stay in history (`RemoteAPIDx.cpp`, last in commit 29a9d868aa).
 
 ## Builds and updates
 
@@ -29,4 +15,8 @@ times out): with unsaved changes, new/open answer 409 `unsaved_changes` unless `
   (`gh release create orca-dx --target main` with a personal token); the workflow only
   swaps its asset and notes.
 - `dx-sync-upstream` (daily) merges a new MaxEllis release and starts the build; a conflict or a
-  refused push opens an issue, then run `dx/sync-upstream.sh` locally.
+  refused push opens an issue, then run `dx/sync-upstream.sh` locally. Upstream rebuilds its
+  branch on each new OrcaSlicer base (2.4 to 2.5 did), and a plain merge then conflicts in
+  thousands of files: take upstream's tree whole (`git merge -s ours --no-commit <tag>`,
+  `git read-tree -u --reset <tag>`, then restore `dx/`, the two `dx-*.yml` workflows and the
+  README note from `main`).

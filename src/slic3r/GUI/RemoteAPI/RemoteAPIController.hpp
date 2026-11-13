@@ -151,6 +151,7 @@ private:
     Response handle_save_project(const std::string &body);          // project: POST /project/save
     Response handle_open_project(const std::string &body);          // project: POST /project/open
     Response handle_new_project(const std::string &body);           // project: POST /project/new
+    Response handle_calibration(const std::string &body);           // dx: POST /calibration (Calibration menu)
     Response handle_get_recent_projects();                          // project: GET /project/recent
     Response handle_forget_recent_project(const std::string &body); // project: DELETE /project/recent
     Response handle_browse_projects(const std::string &target);     // project: GET /project/browse?dir=

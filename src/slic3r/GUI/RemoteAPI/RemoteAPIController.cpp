@@ -4479,6 +4479,213 @@ Response Controller::handle_new_project(const std::string &body)
     return { 200, r };
 }
 
+// --- dx: calibration tests (the Calibration menu without its dialogs) ------------
+
+// The request of POST /calibration, checked the way the menu's dialogs check their fields.
+struct CalibrationRequest
+{
+    std::string   kind;
+    Calib_Params  params;
+    bool          flow_linear  = false;
+    int           flow_pass    = 1;
+    InfillPattern flow_pattern = ipArchimedeanChords;
+    std::string   if_unsaved   = "fail";
+    std::string   if_preset_changes = "fail";
+};
+
+// Empty string: valid. Otherwise the error code; detail says what the menu would have said.
+static std::string parse_calibration_request(const nlohmann::json &in, CalibrationRequest &out, std::string &detail)
+{
+    if (!in.is_object()) return "body_must_be_object";
+    if (!in.contains("kind") || !in["kind"].is_string()) {
+        detail = "kind: temp_tower | flow_rate | pa_tower | pa_line | pa_pattern | max_volumetric | retraction";
+        return "bad_kind";
+    }
+    out.kind = in["kind"].get<std::string>();
+    if (!parse_if_unsaved(in, out.if_unsaved)) {
+        detail = "save | discard | fail";
+        return "bad_if_unsaved";
+    }
+    if (in.contains("if_preset_changes") && !in["if_preset_changes"].is_null()) {
+        const auto &v = in["if_preset_changes"];
+        if (!v.is_string() || (v != "fail" && v != "discard")) {
+            detail = "if_preset_changes: discard | fail";
+            return "bad_if_preset_changes";
+        }
+        out.if_preset_changes = v.get<std::string>();
+    }
+    // A number field: absent takes the default; present must be a number.
+    std::string bad;
+    auto num = [&in, &bad](const char *key, double dflt) -> double {
+        if (!in.contains(key) || in[key].is_null()) return dflt;
+        if (!in[key].is_number()) { bad = key; return dflt; }
+        return in[key].get<double>();
+    };
+    auto flag = [&in, &bad](const char *key, bool dflt) -> bool {
+        if (!in.contains(key) || in[key].is_null()) return dflt;
+        if (!in[key].is_boolean()) { bad = key; return dflt; }
+        return in[key].get<bool>();
+    };
+    auto numbers = [&in, &bad](const char *key, std::vector<double> &dst) {
+        dst.clear();
+        if (!in.contains(key) || in[key].is_null()) return;
+        if (!in[key].is_array()) { bad = key; return; }
+        for (const auto &v : in[key]) {
+            if (!v.is_number() || v.get<double>() <= 0) { bad = key; return; }
+            dst.push_back(v.get<double>());
+        }
+    };
+    Calib_Params &p = out.params;
+    const std::string &k = out.kind;
+    if (k == "temp_tower") {
+        p.mode  = CalibMode::Calib_Temp_Tower;
+        p.start = num("start", 230);
+        p.end   = num("end", 190);
+        p.nozzle_based_resize = flag("nozzle_based_resize", true);
+        p.test_model = 0; // the standard tower; belt provini are picked in the dialog only
+        if (!bad.empty()) { detail = bad + " has the wrong type"; return "bad_field"; }
+        if (p.start != std::floor(p.start) || p.end != std::floor(p.end) || p.start > 500 || p.end < 155 ||
+            p.end > p.start - 5) {
+            detail = "start <= 500, end >= 155, start >= end + 5, whole degrees";
+            return "bad_range";
+        }
+    } else if (k == "pa_tower" || k == "pa_line" || k == "pa_pattern") {
+        p.mode  = k == "pa_tower" ? CalibMode::Calib_PA_Tower : k == "pa_line" ? CalibMode::Calib_PA_Line : CalibMode::Calib_PA_Pattern;
+        p.start = num("start", 0.0);
+        p.end   = num("end", k == "pa_pattern" ? 0.08 : 0.1);
+        p.step  = num("step", k == "pa_pattern" ? 0.005 : 0.002);
+        // The dialog: numbers are a choice for PA Line, always on for the pattern, off for the tower.
+        p.print_numbers = k == "pa_line" ? flag("print_numbers", true) : k == "pa_pattern";
+        if (k == "pa_pattern") {
+            numbers("accelerations", p.accelerations);
+            numbers("speeds", p.speeds);
+        }
+        if (!bad.empty()) { detail = bad + " has the wrong type"; return "bad_field"; }
+        if (p.start < 0 || p.step < 10 * EPSILON || p.end < p.start + p.step) {
+            detail = "start >= 0, end > start, step >= 0.001";
+            return "bad_range";
+        }
+        if (!p.accelerations.empty() && !p.speeds.empty() &&
+            *std::min_element(p.accelerations.begin(), p.accelerations.end()) <=
+                *std::max_element(p.speeds.begin(), p.speeds.end())) {
+            detail = "accelerations must be greater than speeds (swapped?)";
+            return "bad_range";
+        }
+    } else if (k == "flow_rate") {
+        p.mode           = CalibMode::Calib_Flow_Rate;
+        out.flow_linear  = flag("linear", false);
+        const double pass = num("pass", 1);
+        if (!bad.empty()) { detail = bad + " has the wrong type"; return "bad_field"; }
+        if (pass != 1 && pass != 2) { detail = "pass: 1 or 2"; return "bad_range"; }
+        out.flow_pass = (int) pass;
+        if (in.contains("pattern") && !in["pattern"].is_null()) {
+            const auto &v = in["pattern"];
+            if (v == "archimedean") out.flow_pattern = ipArchimedeanChords;
+            else if (v == "monotonic") out.flow_pattern = ipMonotonic;
+            else { detail = "pattern: archimedean | monotonic"; return "bad_field"; }
+        }
+    } else if (k == "max_volumetric" || k == "retraction") {
+        const bool vol = k == "max_volumetric";
+        p.mode  = vol ? CalibMode::Calib_Vol_speed_Tower : CalibMode::Calib_Retraction_tower;
+        p.start = num("start", vol ? 5 : 0);
+        p.end   = num("end", vol ? 20 : 2);
+        p.step  = num("step", vol ? 0.5 : 0.1);
+        if (!bad.empty()) { detail = bad + " has the wrong type"; return "bad_field"; }
+        if ((vol ? p.start <= 0 : p.start < 0) || p.step <= 0 || p.end < p.start + p.step) {
+            detail = vol ? "start > 0, step > 0, end >= start + step" : "start >= 0, step > 0, end >= start + step";
+            return "bad_range";
+        }
+    } else {
+        detail = "kind: temp_tower | flow_rate | pa_tower | pa_line | pa_pattern | max_volumetric | retraction";
+        return "bad_kind";
+    }
+    return {};
+}
+
+// POST /calibration - builds the test the Calibration menu builds: a new project with the model,
+// its settings and the per-height parameter the G-code generator applies. It replaces the project,
+// so it answers the unsaved-changes question the way POST /project/new does, and the preset edits
+// question up front (the menu would open a dialog for it). Slicing and printing stay separate calls.
+Response Controller::handle_calibration(const std::string &body)
+{
+    nlohmann::json in = body.empty() ? nlohmann::json::object() : nlohmann::json::parse(body); // parse_error -> 400
+    CalibrationRequest req;
+    std::string detail;
+    const std::string bad = parse_calibration_request(in, req, detail);
+    if (!bad.empty()) return { 400, {{"error", bad}, {"detail", detail}} };
+
+    nlohmann::json r = run_on_ui([this, req]() -> nlohmann::json {
+        const std::string label = "Calibration " + req.kind;
+        auto refuse = [&label](nlohmann::json e) -> nlohmann::json {
+            mcp_refused_reply(label, e, "POST /calibration");
+            return e;
+        };
+        Plater *plater = wxGetApp().plater();
+        if (plater->is_background_process_slicing()) return refuse({{"error", "slicing"}});
+        if (plater->is_loading_project()) return refuse({{"error", "busy"}});
+        {
+            const auto &cfg  = wxGetApp().preset_bundle->printers.get_edited_preset().config;
+            const auto *belt = cfg.option<ConfigOptionBool>("belt_printer");
+            if (belt != nullptr && belt->value && (req.kind == "pa_line" || req.kind == "pa_pattern"))
+                return refuse({{"error", "belt_printer"}, {"detail", "belt printers have the PA tower only"}});
+        }
+        nlohmann::json out = nlohmann::json::object();
+        const std::string err = answer_unsaved_prompt(plater, req.if_unsaved, out);
+        if (!err.empty()) {
+            nlohmann::json e = {{"error", err}, {"project", project_json(plater)}};
+            if (err == "unsaved_changes") e["detail"] = "pass if_unsaved: \"save\" or \"discard\"";
+            return refuse(e);
+        }
+        // The menu's new project asks about edited presets in a dialog; the API answers before it opens.
+        if (wxGetApp().has_current_preset_changes()) {
+            if (req.if_preset_changes != "discard")
+                return refuse({{"error", "unsaved_preset_changes"}, {"modified", dirty_preset_groups()},
+                               {"detail", "save the presets, or pass if_preset_changes: \"discard\""}});
+            out["discarded_presets"] = discard_preset_edits();
+        }
+        mcp_before_change();
+        plater->model().set_backup_path("");
+        {
+            // The project question is answered above; "no" keeps calib_*'s own new_project from asking again.
+            AppConfigOverride no_save_prompt("save_project_choise", "no");
+            switch (req.params.mode) {
+            case CalibMode::Calib_Temp_Tower:       plater->calib_temp(req.params); break;
+            case CalibMode::Calib_Flow_Rate:        plater->calib_flowrate(req.flow_linear, req.flow_pass, req.flow_pattern); break;
+            case CalibMode::Calib_PA_Tower:
+            case CalibMode::Calib_PA_Line:
+            case CalibMode::Calib_PA_Pattern:       plater->calib_pa(req.params); break;
+            case CalibMode::Calib_Vol_speed_Tower:  plater->calib_max_vol_speed(req.params); break;
+            case CalibMode::Calib_Retraction_tower: plater->calib_retraction(req.params); break;
+            default: break;
+            }
+        }
+        sync_slice_state_to_current_plate("slice.plate_changed");
+        const size_t objects = plater->model().objects.size();
+        if (objects == 0)
+            return refuse({{"error", "not_created"}, {"detail", "the calibration left the plate empty"}});
+        {
+            McpRow row = mcp_row("file", "Calibration", req.kind);
+            row.target = {{"type", "project_new"}, {"name", req.kind}};
+            mcp_record(std::move(row));
+        }
+        out["ok"]       = true;
+        out["kind"]     = req.kind;
+        out["objects"]  = objects;
+        out["project"]  = project_json(plater);
+        out["modified"] = dirty_preset_groups();
+        return out;
+    }, /*timeout_s=*/120);
+    if (r.contains("error")) {
+        const std::string e = r["error"].get<std::string>();
+        if (e != "slicing" && e != "unsaved_changes" && e != "unsaved_preset_changes")
+            api_notify("Couldn't create the calibration (" + e + ")", true);
+        if (e == "unsaved_preset_changes" || e == "unsaved_changes") return { 409, r };
+        return project_error_response(r);
+    }
+    api_notify("Calibration " + req.kind);
+    return { 200, r };
+}
+
 // --- project files: recent list, browse, move, delete ----------------------------
 
 // GET /project/recent - File > Recent, most recent first, with whether each file
@@ -5580,6 +5787,10 @@ Response Controller::dispatch_route(const Request &req)
         }
         if (is("POST", "/api/v1/project/new")) {
             try { return handle_new_project(req.body); }
+            catch (const nlohmann::json::parse_error &) { return { 400, {{"error", "invalid_json"}} }; }
+        }
+        if (is("POST", "/api/v1/calibration")) {
+            try { return handle_calibration(req.body); }
             catch (const nlohmann::json::parse_error &) { return { 400, {{"error", "invalid_json"}} }; }
         }
         if (is("DELETE", "/api/v1/project/recent")) {

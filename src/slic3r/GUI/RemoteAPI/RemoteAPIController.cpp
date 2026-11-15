@@ -4653,7 +4653,14 @@ Response Controller::handle_calibration(const std::string &body)
             case CalibMode::Calib_Flow_Rate:        plater->calib_flowrate(req.flow_linear, req.flow_pass, req.flow_pattern); break;
             case CalibMode::Calib_PA_Tower:
             case CalibMode::Calib_PA_Line:
-            case CalibMode::Calib_PA_Pattern:       plater->calib_pa(req.params); break;
+            case CalibMode::Calib_PA_Pattern: {
+                // The pattern keeps a reference to its params (CalibPressureAdvancePattern::m_params) and reads
+                // it again at every slice, so they must outlive this lambda, as the menu dialog's own do.
+                static Calib_Params s_pa_params;
+                s_pa_params = req.params;
+                plater->calib_pa(s_pa_params);
+                break;
+            }
             case CalibMode::Calib_Vol_speed_Tower:  plater->calib_max_vol_speed(req.params); break;
             case CalibMode::Calib_Retraction_tower: plater->calib_retraction(req.params); break;
             default: break;
